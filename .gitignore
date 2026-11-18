@@ -1,0 +1,30 @@
+# Rust
+target/
+# Cargo.lock：本 workspace 含可执行程序，保留锁文件以保证 CI 与本地构建一致
+*.rs.bk
+
+# Tauri / 前端
+node_modules/
+ui/frontend/dist/
+ui/src-tauri/target/
+
+# 构建产物
+dist/
+release/
+*.log
+landesk-encoder.log
+
+# 本地配置
+.env
+.config.local/
+
+# 裁剪 libav 本地产物（不进仓库，scripts 生成）
+thirdparty/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# 内部工作区数据
+.workbuddy/
