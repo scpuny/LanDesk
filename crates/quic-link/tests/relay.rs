@@ -120,8 +120,8 @@ async fn relay_two_peers_transparent() {
     b.close(0u32.into(), b"done");
     let _ = drv.await.expect("drive task");
 
-    qa.close(0u32.into(), b"done");
-    qb.close(0u32.into(), b"done");
+    qa.close(0u32, b"done");
+    qb.close(0u32, b"done");
     ca.close();
     cb.close();
     relay.close();
@@ -154,7 +154,7 @@ async fn relay_rejects_bad_ticket() {
     );
 
     a.close(0u32.into(), b"done");
-    qa.close(0u32.into(), b"done");
+    qa.close(0u32, b"done");
     ca.close();
     relay.close();
 }

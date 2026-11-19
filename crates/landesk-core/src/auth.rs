@@ -63,6 +63,12 @@ impl ClientHandshake {
     }
 }
 
+impl Default for ClientHandshake {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// 受控端握手材料（随机 nonce + X25519 密钥对）。
 pub struct ServerHandshake {
     pub keypair: EcdhKeyPair,
@@ -87,6 +93,12 @@ impl ServerHandshake {
             server_x25519: self.keypair.public_key().0,
             server_nonce: self.server_nonce,
         }
+    }
+}
+
+impl Default for ServerHandshake {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

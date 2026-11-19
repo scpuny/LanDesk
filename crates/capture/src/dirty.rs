@@ -126,9 +126,8 @@ mod tests {
     use super::*;
 
     fn frame_4x4() -> RawFrame {
-        let mut f = RawFrame::new_bgra(4, 4);
         // 填充全 0
-        f
+        RawFrame::new_bgra(4, 4)
     }
 
     fn frame_4x4_v2(prev: RawFrame) -> RawFrame {

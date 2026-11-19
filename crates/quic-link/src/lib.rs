@@ -36,20 +36,15 @@ pub use server::QuicServer;
 pub use tls::{SelfSigned, TlsError};
 
 /// 连接方式（FR-09.3 状态栏展示）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnMode {
     /// 内网直连（mDNS 发现）。
+    #[default]
     Inner,
     /// 外网 P2P 打洞成功。
     P2p,
     /// 中继转发（FR-11 兜底）。
     Relay,
-}
-
-impl Default for ConnMode {
-    fn default() -> Self {
-        ConnMode::Inner
-    }
 }
 
 #[cfg(test)]

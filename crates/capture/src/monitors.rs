@@ -40,7 +40,7 @@ impl MemoryMonitors {
                 self.monitors.retain(|m| &m.index != i);
             }
             DisplayEvent::ResChanged(m) => {
-                if let Some(slot) = self.monitors.iter_mut().find(|x| &x.index == &m.index) {
+                if let Some(slot) = self.monitors.iter_mut().find(|x| x.index == m.index) {
                     *slot = *m;
                 }
             }

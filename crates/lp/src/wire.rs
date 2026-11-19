@@ -57,10 +57,10 @@ impl ControlFrame {
             ControlMsg::Heartbeat(v) => Ok(vec![*v]),
             _ => {
                 let b = bincode::serialize(&self.msg).map_err(|e| LpError::Serialize(e.to_string()))?;
-                if b.len() > CONTROL_MAX_PAYLOAD as usize {
+                if b.len() > CONTROL_MAX_PAYLOAD {
                     return Err(LpError::FrameLenMismatch {
                         declared: b.len(),
-                        remaining: CONTROL_MAX_PAYLOAD as usize,
+                        remaining: CONTROL_MAX_PAYLOAD,
                     });
                 }
                 Ok(b)

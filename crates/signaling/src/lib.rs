@@ -204,7 +204,6 @@ fn classify_incoming(m: &SignalingMsg) -> ClientIn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn reg_serialization() {

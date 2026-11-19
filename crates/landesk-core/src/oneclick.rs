@@ -223,7 +223,7 @@ impl Controller {
             .client
             .connect(addr, sni, bootstrap.enc_key)
             .await
-            .map_err(|e| CoreError::Quic(e))?;
+            .map_err(CoreError::Quic)?;
 
         // 认证隧道（bootstrap 密钥）：C 发 AuthReq(prefix_cs)，读 AuthRes(prefix_sc)。
         let cs = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_cs);
@@ -340,7 +340,7 @@ impl Controlled {
             .server
             .accept(bootstrap.enc_key)
             .await
-            .map_err(|e| CoreError::Quic(e))?;
+            .map_err(CoreError::Quic)?;
 
         // 认证隧道（bootstrap 密钥）：S 读 AuthReq(prefix_cs)，写 AuthRes(prefix_sc)。
         // 密码错 → bootstrap.enc_key 不一致 → 下行这步 tag 校验直接失败。

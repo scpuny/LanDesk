@@ -161,7 +161,7 @@ fn parse_xor_mapped(val: &[u8], cookie: u32) -> Option<(std::net::IpAddr, u16)> 
     let xor_port = u16::from_be_bytes([val[3], val[4]]);
     let port = xor_port ^ ((cookie >> 16) as u16);
     let xor_addr = u32::from_be_bytes([val[5], val[6], val[7], val[8]]);
-    let ip4 = u32::from(xor_addr) ^ cookie;
+    let ip4 = xor_addr ^ cookie;
     Some((std::net::IpAddr::V4(std::net::Ipv4Addr::from(ip4)), port))
 }
 

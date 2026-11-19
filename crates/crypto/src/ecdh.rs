@@ -9,7 +9,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 pub struct X25519Pub(pub [u8; 32]);
 
 impl X25519Pub {
-    fn to_dalek(&self) -> PublicKey {
+    fn to_dalek(self) -> PublicKey {
         PublicKey::from(self.0)
     }
 }
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn invalid_pub_len_rejected() {
         let kp = EcdhKeyPair::generate();
-        assert!(validate_pub_key(&vec![0u8; 31]).is_err());
+        assert!(validate_pub_key(&[0u8; 31]).is_err());
         let good: [u8; 32] = kp.public_key().0;
         assert!(validate_pub_key(&good).is_ok());
     }
