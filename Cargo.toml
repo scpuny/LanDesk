@@ -33,6 +33,7 @@ futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1"
+bytes = "1"
 # 密码学
 # static_secrets：启用 `StaticSecret`（可复用私钥），供 ECDH 密钥对持有私钥并反复派生共享密钥。
 x25519-dalek = { version = "2", features = ["static_secrets"] }
@@ -56,6 +57,8 @@ thiserror = "1"
 anyhow = "1"
 # CLI
 clap = { version = "4", features = ["derive"] }
+# 证书（QUIC TLS 自签，M3 环路测试用）
+rcgen = "0.13"
 # 内部 crate
 lp = { path = "crates/lp" }
 crypto = { path = "crates/crypto" }

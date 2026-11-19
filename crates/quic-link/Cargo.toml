@@ -11,4 +11,11 @@ lp = { workspace = true }
 crypto = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+quinn = { workspace = true }
+rcgen = { workspace = true }
 tracing = { workspace = true }
+# 密码学（gcm.rs 适配器直用）
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+# 视频 Datagram 字节载体（conn.rs send/recv）
+bytes = { workspace = true }
