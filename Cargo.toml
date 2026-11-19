@@ -17,6 +17,7 @@ members = [
     "apps/controlled",
     "apps/controller",
     "apps/relay-server",
+    "apps/ui-server",
 ]
 
 [workspace.package]

@@ -48,7 +48,10 @@ pub struct IceCandidate {
 }
 
 /// 打洞结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// 派生 `Serialize`/`Deserialize`：供 `ui-server` REST（`/api/choose-path` 入参）与
+/// `landesk-ui::decide_path` 消费；变体名按默认（`Direct`/`NeedRelay`/`NoPath`）序列化。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HoleResult {
     /// P2P 直连成功。
     Direct,
