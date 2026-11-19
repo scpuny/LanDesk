@@ -1,0 +1,99 @@
+// LanDesk 前端 ↔ 后端桥接封装（对齐 ui/src-tauri 的 Tauri 命令 + apps/ui-server 的 REST）。
+// 双轨降级：Tauri 宿主走 invoke；浏览器走 REST /api/*。
+// 出参为 landesk-ui 的可序列化模型（JSON 直进组件）。
+import type { DeviceRow, LanDeskConfig } from '../types/index'
+
+interface ReconnectView {
+  attempt: number
+  max: number
+  mode: string
+}
+interface PathDecision {
+  use?: { connMode: string }
+  nopath?: boolean
+}
+
+function isTauri(): boolean {
+  return typeof window !== 'undefined' &&
+    !!window.__TAURI__?.core?.invoke
+}
+
+async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  return await window.__TAURI__!.core!.invoke(cmd, args) as T
+}
+
+async function rest<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+  const { method = 'GET', body } = options
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (res.status === 204) return null as T
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let msg = `${res.status} ${res.statusText}`
+    try {
+      const j = JSON.parse(text) as { error?: string }
+      msg = j.error ? `${res.status}: ${j.error}` : text
+    } catch {
+      if (text) msg = text
+    }
+    throw new Error(msg)
+  }
+  const ct = res.headers.get('content-type') || ''
+  return (ct.includes('application/json') ? await res.json() : await res.text()) as T
+}
+
+interface RawDevice {
+  id: string
+  name: string
+  addr: string
+  res: string
+  enc?: string | string[]
+  relay?: boolean
+  online?: boolean
+  last_seen?: number
+}
+
+export const landesk = {
+  /** 配置页：读或首次生成默认模板（FR-08） */
+  configLoadOrInit(): Promise<LanDeskConfig> {
+    return isTauri()
+      ? tauriInvoke<LanDeskConfig>('config_load_or_init')
+      : rest<LanDeskConfig>('/api/config')
+  },
+
+  /** 配置页：保存（FR-08） */
+  configSave(config: LanDeskConfig): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('config_save', { config })
+      : rest<void>('/api/config', { method: 'POST', body: config })
+  },
+
+  /** 设备列表（FR-01.2/01.4） */
+  deviceList(devices: RawDevice[], nowEpochSecs: number): Promise<RawDevice[]> {
+    return isTauri()
+      ? tauriInvoke<RawDevice[]>('device_list', { devices, nowEpochSecs })
+      : rest<RawDevice[]>('/api/devices')
+  },
+
+  /** 重连指示器（FR-05.4） */
+  reconnectView(usedAttempts: number): Promise<ReconnectView | null> {
+    return isTauri()
+      ? tauriInvoke<ReconnectView | null>('reconnect_view', { usedAttempts })
+      : rest<ReconnectView | null>('/api/reconnect', { method: 'POST', body: { usedAttempts } })
+  },
+
+  /** 连接路径决策（FR-05/11） */
+  choosePath(innerFound: boolean, hole: boolean, relayEnabled: boolean): Promise<PathDecision> {
+    return isTauri()
+      ? tauriInvoke<PathDecision>('choose_path', { innerFound, hole, relayEnabled })
+      : rest<PathDecision>('/api/choose-path', {
+          method: 'POST', body: { innerFound, hole, relayEnabled },
+        })
+  },
+}
+
+export type { DeviceRow }
+export default landesk

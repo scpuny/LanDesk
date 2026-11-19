@@ -1,0 +1,237 @@
+/* =====================================================================
+ * LanDesk Design Tokens
+ * ---------------------------------------------------------------------
+ * 架构移植自 lanLink（web/src/styles/tokens.css），遵循其分层原则：
+ *   1. 组件层只消费语义变量（--ll-*），禁止硬编码色值。新增主题只覆盖语义层。
+ *   2. 原语层（尺度/字体/时长/布局）不随主题变化；语义层随 [data-theme] 切换。
+ *   3. 主题切换在 <html> 上设置 data-theme / data-palette，运行时零重渲染。
+ *
+ * 原型基准（prototype，默认，不写 data-palette）色值来自
+ * Calicat V2 设计稿「LanDesk-设计系统」逐项采样：
+ *   Primary #2F6FED / Hover #245BD4 / Light #E8F0FE / Accent #00B4D8
+ *   Success #16A34A / Warning #F59E0B / Danger #DC2626 / Info #2F6FED
+ *   浅色中性 7 阶：#F5F7FA #FFFFFF #F0F3F8 #E3E8F0 #1D2433 #586577 #9AA3B2
+ *   深色中性 7 阶：#0E1420 #171F2E #1F293B #2B3648 #EBEDF5 #9AA6BA #6B7688
+ *
+ * 其余 6 套视觉风格（Graphite/Aurora/Slate/Carbon/Nocturne/Amber）
+ * 由 palettes.css 覆盖语义层实现，与 lanLink 保持一致。
+ * ===================================================================== */
+
+/* ---------- 原语层（与主题无关） ---------- */
+:root {
+  --ll-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --ll-font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --ll-fs-xs: 11px;
+  --ll-fs-sm: 12px;
+  --ll-fs-md: 13px;
+  --ll-fs-base: 14px;
+  --ll-fs-lg: 14px;
+  --ll-fs-xl: 16px;
+  --ll-fs-2xl: 20px;
+  --ll-fs-3xl: 24px;
+
+  --ll-fw-regular: 400;
+  --ll-fw-medium: 500;
+  --ll-fw-semibold: 600;
+  --ll-fw-bold: 700;
+
+  --ll-color-nav-text: var(--ll-color-text-secondary);
+  --ll-fw-nav: var(--ll-fw-medium);
+
+  --ll-lh-tight: 1.25;
+  --ll-lh-base: 1.5;
+  --ll-lh-relaxed: 1.7;
+
+  --ll-space-1: 4px;
+  --ll-space-2: 8px;
+  --ll-space-3: 12px;
+  --ll-space-4: 16px;
+  --ll-space-5: 20px;
+  --ll-space-6: 24px;
+  --ll-space-7: 28px;
+  --ll-space-8: 32px;
+  --ll-space-10: 40px;
+  --ll-space-12: 48px;
+
+  --ll-radius-xs: 6px;   /* 控件 6（V2 设计稿） */
+  --ll-radius-sm: 6px;
+  --ll-radius-md: 10px;  /* 卡片 10 */
+  --ll-radius-lg: 10px;
+  --ll-radius-xl: 14px;  /* 弹窗 14 */
+  --ll-radius-full: 999px;
+
+  --ll-duration-fast: 120ms;
+  --ll-duration-base: 200ms;
+  --ll-duration-slow: 320ms;
+  --ll-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ll-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* 布局尺寸（V2 设计稿基准：侧栏 200 / 顶栏 60；会话页独立尺寸另定义） */
+  --ll-titlebar-h: 60px;
+  --ll-rail-w: 200px;
+  --ll-statusbar-h: 32px;
+  --ll-window-inset: 0px;
+  --ll-window-radius: 10px;
+
+  /* 阴影（V2 设计稿：轻阴影 + 焦点环 2px 20% 外发光） */
+  --ll-shadow-1: 0 1px 3px rgba(29, 36, 51, 0.06), 0 1px 2px rgba(29, 36, 51, 0.04);
+  --ll-shadow-2: 0 2px 8px rgba(29, 36, 51, 0.08);
+  --ll-shadow-3: 0 6px 20px rgba(14, 20, 32, 0.12);
+  --ll-shadow-pop: 0 16px 48px rgba(14, 20, 32, 0.18);
+  --ll-shadow-window: 0 12px 40px rgba(14, 20, 32, 0.14), 0 2px 8px rgba(14, 20, 32, 0.06);
+  --ll-focus-ring: 0 0 0 2px color-mix(in srgb, var(--ll-color-brand) 22%, transparent);
+
+  --ll-z-rail: 10;
+  --ll-z-panel: 10;
+  --ll-z-titlebar: 20;
+  --ll-z-menu: 100;
+  --ll-z-dialog: 1000;
+  --ll-z-toast: 1100;
+}
+
+/* ---------- 语义层 · 浅色（原型基准 = V2 设计稿） ---------- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ll-color-canvas: #f5f7fa;
+  --ll-color-bg: #ffffff;
+  --ll-color-bg-elevated: #f0f3f8;
+  --ll-color-surface: #ffffff;
+  --ll-color-surface-2: #f0f3f8;
+  --ll-color-surface-3: #f5f7fa;
+  --ll-color-surface-hover: #eef2f8;
+  --ll-color-row-hover: #f0f3f8;
+  --ll-color-surface-active: #e8f0fe;
+  --ll-color-titlebar: #ffffff;
+
+  --ll-color-border: #e3e8f0;
+  --ll-color-border-strong: #c8d0dc;
+  --ll-color-divider: #eef1f6;
+
+  --ll-color-text: #1d2433;
+  --ll-color-text-secondary: #586577;
+  --ll-color-text-tertiary: #8791a3;
+  --ll-color-text-quaternary: #9aa3b2;
+  --ll-color-text-inverse: #ffffff;
+
+  --ll-color-brand: #2f6fed;
+  --ll-color-brand-hover: #245bd4;
+  --ll-color-brand-active: #1e4fbd;
+  --ll-color-brand-light: #e8f0fe;
+  --ll-color-brand-bg: rgba(47, 111, 237, 0.08);
+  --ll-color-accent: #00b4d8;
+  --ll-color-on-soft: #1e4fbd;  /* 设备码大字：brand-light 软底上的前景色（浅色用深蓝，对比 6.3:1） */
+  --ll-color-info-surface: #e8f0fe;
+  --ll-color-info-border: #b9d2fb;
+
+  --ll-color-success: #16a34a;
+  --ll-color-success-hover: #15803d;
+  --ll-color-success-bg: rgba(22, 163, 74, 0.08);
+  --ll-color-success-light: #ebf9ef;
+  --ll-color-success-border: rgba(22, 163, 74, 0.35);
+
+  --ll-color-warning: #f59e0b;
+  --ll-color-warning-hover: #d97706;
+  --ll-color-warning-bg: rgba(245, 158, 11, 0.10);
+  --ll-color-warning-light: #fff7e6;
+
+  --ll-color-danger: #dc2626;
+  --ll-color-danger-hover: #b91c1c;
+  --ll-color-danger-bg: rgba(220, 38, 38, 0.08);
+  --ll-color-danger-light: #feeeee;
+  --ll-color-on-danger: #ffffff;  /* danger 实底按钮文字：浅色 danger 够深，用白字 */
+
+  --ll-color-info: #2f6fed;
+  --ll-color-info-bg: rgba(47, 111, 237, 0.08);
+
+  --ll-color-overlay: rgba(29, 36, 51, 0.45);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #f0f3f8;
+  --ll-serial-text: #1d2433;
+
+  --ll-shadow-1: 0 1px 3px rgba(29, 36, 51, 0.06), 0 1px 2px rgba(29, 36, 51, 0.04);
+  --ll-shadow-2: 0 2px 8px rgba(29, 36, 51, 0.08);
+  --ll-shadow-3: 0 6px 20px rgba(14, 20, 32, 0.12);
+  --ll-shadow-pop: 0 16px 48px rgba(14, 20, 32, 0.18);
+  --ll-shadow-window: 0 12px 40px rgba(14, 20, 32, 0.14), 0 2px 8px rgba(14, 20, 32, 0.06);
+}
+
+/* ---------- 语义层 · 深色（同一套语义变量） ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ll-color-canvas: #0e1420;
+  --ll-color-bg: #171f2e;
+  --ll-color-bg-elevated: #1f1f2e;
+  --ll-color-surface: #1f293b;
+  --ll-color-surface-2: #242f44;
+  --ll-color-surface-3: #2b3648;
+  --ll-color-surface-hover: #26334a;
+  --ll-color-row-hover: #2e3c54;
+  --ll-color-surface-active: #1b2b4d;
+  --ll-color-titlebar: #1f1f2e;
+
+  --ll-color-border: #2b3648;
+  --ll-color-border-strong: #3b4960;
+  --ll-color-divider: #253044;
+
+  --ll-color-text: #ebedf5;
+  --ll-color-text-secondary: #9aa6ba;
+  --ll-color-text-tertiary: #7a8699;
+  --ll-color-text-quaternary: #6b7688;
+  --ll-color-text-inverse: #0e1420;
+
+  --ll-color-brand: #5b92f5;
+  --ll-color-brand-hover: #7aa8f8;
+  --ll-color-brand-active: #4679de;
+  --ll-color-brand-light: #1a2c4d;
+  --ll-color-brand-bg: rgba(91, 146, 245, 0.16);
+  --ll-color-accent: #22c9e8;
+  --ll-color-on-soft: #5b92f5;  /* 设备码大字：深色主题用 brand（对比 4.55:1） */
+  --ll-color-info-surface: #1a2c4d;
+  --ll-color-info-border: #2d4878;
+
+  --ll-color-success: #22c55e;
+  --ll-color-success-hover: #4ade80;
+  --ll-color-success-bg: rgba(34, 197, 94, 0.16);
+  --ll-color-success-light: #142a1c;
+  --ll-color-success-border: rgba(34, 197, 94, 0.4);
+
+  --ll-color-warning: #fbbf24;
+  --ll-color-warning-hover: #fcd34d;
+  --ll-color-warning-bg: rgba(251, 191, 36, 0.16);
+  --ll-color-warning-light: #2e2513;
+
+  --ll-color-danger: #f87171;
+  --ll-color-danger-hover: #fca5a5;
+  --ll-color-danger-bg: rgba(248, 113, 113, 0.16);
+  --ll-color-danger-light: #2e1a1a;
+  --ll-color-on-danger: #2e1a1a;  /* danger 实底按钮文字：深色 danger 偏亮，用深字(5.94:1) */
+
+  --ll-color-info: #5b92f5;
+  --ll-color-info-bg: rgba(91, 146, 245, 0.16);
+
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #131a29;
+  --ll-serial-text: #ebedf5;
+
+  --ll-shadow-1: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --ll-shadow-2: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --ll-shadow-3: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --ll-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.66);
+  --ll-shadow-window: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* 会话预览区 / 日志终端：恒为深色（工具属性，不受主题影响） */
+:root {
+  --ll-session-chrome: #1f293b;
+  --ll-session-chrome-strong: #2b3648;
+  --ll-session-canvas: #000000;
+  --ll-session-text: #e8edf5;
+  --ll-session-text-dim: #9aa6ba;
+}

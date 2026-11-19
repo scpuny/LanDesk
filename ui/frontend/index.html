@@ -3,10 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LanDesk</title>
+    <title>LanDesk · 远程桌面</title>
+    <script>
+      // 防主题闪烁：首屏绘制前写入 data-theme（key 与 useTheme.js 保持一致）
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('ld-theme') || 'system'
+          var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          document.documentElement.setAttribute('data-theme', pref === 'system' ? sys : pref)
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
