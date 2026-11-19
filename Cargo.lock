@@ -875,11 +875,27 @@ dependencies = [
  "quic-link",
  "quinn",
  "rand 0.8.8",
+ "serde",
+ "serde_json",
  "sha2",
  "signaling",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "landesk-ui"
+version = "0.1.0"
+dependencies = [
+ "ice",
+ "landesk-core",
+ "mdns",
+ "quic-link",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

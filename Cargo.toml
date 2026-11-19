@@ -13,6 +13,7 @@ members = [
     "crates/clipboard",
     "crates/landesk-core",
     "crates/signaling-server",
+    "crates/ui",
     "apps/controlled",
     "apps/controller",
     "apps/relay-server",
@@ -75,6 +76,7 @@ signaling = { path = "crates/signaling" }
 mdns = { path = "crates/mdns" }
 clipboard = { path = "crates/clipboard" }
 landesk-core = { path = "crates/landesk-core" }
+landesk-ui = { path = "crates/ui" }
 
 [profile.release]
 lto = true
