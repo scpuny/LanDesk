@@ -4,9 +4,10 @@
 //! 信令/STUN/中继地址、编码预设、日志级别、脏矩形开关。
 
 use lp::msg::EncodePreset;
+use serde::{Deserialize, Serialize};
 
 /// 日志级别（NFR-06）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LogLevel {
     #[default]
     Info,
@@ -16,7 +17,7 @@ pub enum LogLevel {
 }
 
 /// 受控端配置。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     /// 设备名（≤32B）。
     pub device_name: String,
@@ -57,3 +58,102 @@ impl Default for Config {
         }
     }
 }
+
+// ---------- JSON 持久化（FR-08 配置页 / NFR-06 可观测）----------
+
+/// 配置持久化错误。
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// 文件读写失败。
+    #[error("config io: {0}")]
+    Io(#[from] std::io::Error),
+    /// JSON 序列化 / 反序列化失败。
+    #[error("config json: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+impl Config {
+    /// 序列化为 JSON 字符串（配置页「保存」落盘用）。
+    pub fn to_json(&self) -> Result<String, ConfigError> {
+        Ok(serde_json::to_string(self)?)
+    }
+
+    /// 从 JSON 字符串反序列化。
+    pub fn from_json(raw: &str) -> Result<Self, ConfigError> {
+        Ok(serde_json::from_str(raw)?)
+    }
+
+    /// 从文件读配置（文件不存在 → 返回 [`Config::default`]，首次生成默认模板，§5.1）。
+    pub fn load_file(path: &std::path::Path) -> Result<Self, ConfigError> {
+        match std::fs::read(path) {
+            Ok(bytes) => Self::from_json(&String::from_utf8_lossy(&bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// 写配置到文件（自动建父目录）。
+    pub fn save_file(&self, path: &std::path::Path) -> Result<(), ConfigError> {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(path, self.to_json()?)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env::temp_dir;
+
+    /// 隔离的临时文件路径（按进程号避免并发测试冲突；`save_file` 自动建父目录）。
+    fn tmp(name: &str) -> std::path::PathBuf {
+        temp_dir()
+            .join(format!("landesk-cfg-test-{}", std::process::id()))
+            .join(name)
+    }
+
+    #[test]
+    fn default_config_is_public_off_and_relay_on() {
+        let c = Config::default();
+        assert!(!c.signaling_enabled, "默认不主动暴露公网（NFR-03）");
+        assert!(c.relay_enabled, "默认中继开（FR-11.2 可选）");
+        assert!(c.mdns_enabled, "默认内网 mDNS 发现（FR-01）");
+        assert_eq!(c.preset, EncodePreset::Balanced);
+    }
+
+    #[test]
+    fn json_roundtrip_preserves_fields() {
+        let mut c = Config::default();
+        c.device_name = "devboard-ok3568".into();
+        c.password = Some("s3cr3t".into());
+        c.preset = EncodePreset::Hd;
+        c.dirty_rect = false;
+        c.log_level = LogLevel::Debug;
+        let s = c.to_json().expect("serialize");
+        let back = Config::from_json(&s).expect("deserialize");
+        assert_eq!(back, c, "JSON 往返字段一致");
+    }
+
+    #[test]
+    fn save_then_load_file() {
+        let path = tmp("config.json");
+        let mut c = Config::default();
+        c.device_name = "mac-mini".into();
+        c.save_file(&path).expect("save");
+        let loaded = Config::load_file(&path).expect("load");
+        assert_eq!(loaded, c, "落盘后读回一致");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_yields_default() {
+        let path = tmp("no-such.json");
+        let c = Config::load_file(&path).expect("load missing → default");
+        assert_eq!(c, Config::default(), "缺文件回填默认（§5.1 首次生成模板）");
+    }
+}
+

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LanDesk",
+  "version": "0.1.0",
+  "identifier": "cn.landesk.app",
+  "build": {
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LanDesk",
+        "width": 980,
+        "height": 680,
+        "minWidth": 720,
+        "minHeight": 480
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
+}

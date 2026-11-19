@@ -1,0 +1,41 @@
+[package]
+name = "landesk-app"
+version = "0.1.0"
+edition = "2021"
+authors = ["LanDesk Team"]
+license = "MIT"
+description = "LanDesk Tauri 壳（形态 B，M8）：调 landesk-ui 纯命令内核。tauri feature 默认关——离线 vendor 无 tauri，需 Tauri 工具链时开启。"
+
+# ★ 自成 workspace（空表 = 本目录为 root，与 LanDesk 主仓断离）：
+# 主仓 `cargo build/test --offline --locked` 不解析本壳的 lock，98 测试离线门不受污染。
+# 首次编译需联网生成本壳独立 lock + 安装 Tauri CLI（见 README）。
+[workspace]
+
+[lib]
+name = "landesk_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "landesk-app"
+path = "src/main.rs"
+
+[features]
+default = []
+# 开启后编译 Tauri app 本体（需 tauri crate + GUI/系统依赖，离线 vendor 不含）。
+tauri = ["dep:tauri", "dep:tauri-build"]
+
+[dependencies]
+# 纯命令内核 + 全部业务类型（经 landesk-ui re-export；已在主仓离线 vendor）。
+landesk-ui = { path = "../../crates/ui" }
+tokio = { version = "1", features = ["full"] }
+
+# Tauri 本体（feature-gate，默认不编译）。
+tauri = { version = "2", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

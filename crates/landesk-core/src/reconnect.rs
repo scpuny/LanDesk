@@ -87,6 +87,16 @@ impl ReconnectScheduler {
         self.used
     }
 
+    /// 退避策略（只读；UI 视图 / 断言用）。
+    pub const fn policy(&self) -> &BackoffPolicy {
+        &self.policy
+    }
+
+    /// 最多重试次数（= 策略的 `max_attempts`）。
+    pub const fn max_attempts(&self) -> u32 {
+        self.policy.max_attempts
+    }
+
     /// 是否已耗尽（`used >= max_attempts`，后续转 `NoPath`）。
     pub fn exhausted(&self) -> bool {
         self.used >= self.policy.max_attempts
