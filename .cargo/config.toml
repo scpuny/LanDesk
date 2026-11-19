@@ -7,15 +7,16 @@ linker = "aarch64-linux-gnu-gcc"
 
 # 静态链接（NFR-05 单文件二进制）
 [build]
-# 仅交叉编译时启用 rustflags，本地 x86_64 构建不受影响
 rustflags = []
 
 # ── 依赖来源：本地 vendor 目录 ──────────────────────────────
 # 本环境 cargo 对 registry 源解包时会设置文件 mtime（futimens），
 # 被系统 LSM 拦截（EPERM），导致 `cargo build` 反复 unpack 失败。
 # 改用本地 directory source（不做 unpack、不设 mtime）彻底绕开。
-# vendor/ 由 .workbuddy/scripts/vendor.py 生成（138 个 registry 包），已纳入仓库，
+# vendor/ 由 .workbuddy/scripts/vendor.py 生成，已纳入仓库，
 # 保证 CI / 任意 checkout 在离线（--offline）下可直接构建，无需访问 crates.io。
+# 新增外部依赖后：更新 lock → 下载缺失 .crate（.workbuddy/scripts/download_missing.py）
+# → 重新跑 vendor.py → 提交 vendor/。
 [source.crates-io]
 replace-with = "vendored"
 

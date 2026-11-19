@@ -1,8 +1,29 @@
 //! `quic-link` — QUIC 双通道（FR-05，对齐 `docs/protocol.md` §1/§2、`architecture.md` §3）。
 //!
-//! M1 占位：定义连接模式枚举与通道抽象。M3 接入 Quinn（可靠控制流 + 不可靠视频 Datagram）。
+//! M3 接入 Quinn：一条 QUIC 连接上同时承载
+//! - **可靠控制流**（reliable stream）：`lp` 控制帧（鉴权/输入/剪贴板/编码器控制/心跳）；
+//! - **不可靠视频 Datagram**（QUIC datagram）：H.264 NALU 分片，低时延可丢包。
+//!
+//! 模块划分：
+//! - [`tls`]：rcgen 自签证书（内网直连 / 环路测试）；
+//! - [`server`] / [`client`]：端点封装；
+//! - [`conn`]：双通道连接句柄 [`QuicConnection`]；
+//! - [`gcm`]：`crypto::GcmSession` 语义的 `lp::wire::Gcm` 适配器 [`LpGcm`]；
+//! - [`error`]：错误类型。
 
-use thiserror::Error;
+pub mod conn;
+pub mod error;
+pub mod gcm;
+pub mod server;
+pub mod client;
+pub mod tls;
+
+pub use client::QuicClient;
+pub use conn::QuicConnection;
+pub use error::QuicLinkError;
+pub use gcm::LpGcm;
+pub use server::QuicServer;
+pub use tls::{SelfSigned, TlsError};
 
 /// 连接方式（FR-09.3 状态栏展示）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,26 +36,9 @@ pub enum ConnMode {
     Relay,
 }
 
-/// QUIC 层错误。
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum QuicLinkError {
-    #[error("quic connect failed: {0}")]
-    ConnectFailed(String),
-    #[error("video dgram send dropped (loss)")]
-    VideoDropped,
-    #[error("control stream closed")]
-    ControlClosed,
-}
-
-/// 双通道句柄（M3 实现；M1 仅为占位结构）。
-pub struct QuicLink {
-    /// 当前连接方式（探测后更新）。
-    pub mode: ConnMode,
-}
-
-impl QuicLink {
-    pub fn new() -> Self {
-        Self { mode: ConnMode::Inner }
+impl Default for ConnMode {
+    fn default() -> Self {
+        ConnMode::Inner
     }
 }
 
@@ -44,6 +48,6 @@ mod tests {
 
     #[test]
     fn default_conn_mode_is_inner() {
-        assert_eq!(QuicLink::new().mode, ConnMode::Inner);
+        assert_eq!(ConnMode::default(), ConnMode::Inner);
     }
 }
