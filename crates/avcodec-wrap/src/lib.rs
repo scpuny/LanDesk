@@ -4,10 +4,13 @@
 //! libav FFI 各编码器后端（qsv/nvenc/amf/v4l2m2m/videotoolbox）与 OpenH264 软编
 //! 按 feature 门控，后续里程碑补全。
 
+pub mod backends;
 pub mod factory;
 pub mod reset;
 
 use thiserror::Error;
+
+pub use backends::{NALU_START_CODE, PlaceholderEncoder};
 
 /// 编码器错误（对齐 NFR-01：驱动异常时降级，不崩溃）。
 #[derive(Debug, Error, PartialEq, Eq)]
