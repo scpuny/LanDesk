@@ -1,0 +1,150 @@
+# LanDesk Release（M9 收尾：tag 触发四平台打包）
+#
+# 设计要点（与 ci.yml / scripts/release/build-all.sh 对齐）：
+# - **复用打包编排**：四平台各 job 不重复实现打包逻辑，统一调 `scripts/release/build-all.sh <plat>`
+#   ——feature 组合（capture/<os> + avcodec-wrap/<编码器链>）、产物归集 dist/<plat>/、
+#   安装器/签名编排都在脚本里；本 workflow 只做「触发 + 矩阵 + 产物收集 + 发 Release」。
+# - **缺 thirdparty / 签名工具不阻塞**：build-all.sh 是编排器，缺裁剪 libav（thirdparty/）或
+#   签名凭据时按契约「跳过 + 提示」而非整体失败。故 CI 上无 ffmpeg 源码也能出**无编码骨架**
+#   二进制 + 打包占位，完整编码产物需本地备 thirdparty/ 后重跑。
+# - **ok3568 走 cross**：矩阵里唯一跨 target（aarch64-unknown-linux-gnu），需装 cross
+#   （容器内含工具链）；build-all.sh 内部自动找 cross 或 aarch64-linux-gnu-gcc。
+# - **依赖锁定**：同 CI，Cargo.lock + vendor/ directory source，构建确定性保证，无需 crates.io。
+#
+# 触发：
+# - 推 `v*` tag（如 v0.1.0）→ 自动四平台打包并发 GitHub Release；
+# - 手动 `workflow_dispatch`：可传 `sign`（需证书 secrets）开关签名。
+#
+# 说明：GitHub Release 的资产为各平台 `dist/<plat>/` 的 zip 包；完整编码/签名产物
+#       需本地备 thirdparty/ 与签名凭据后跑 build-all.sh，CI 默认出骨架产物。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "构建并签名（需对应平台证书 secrets；缺凭据时 build-all.sh 跳过签名并提示）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # 创建 GitHub Release + 上传资产
+
+# release 不取消（产物要落盘），但同 ref 重复触发时串行避免并发发同版本
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build & package (${{ matrix.plat }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # 单平台失败不拖垮其他平台（缺 thirdparty/工具链本就应跳过而非阻塞）
+      matrix:
+        include:
+          - plat: win
+            os: windows-latest
+            needs-cross: false
+          - plat: linux
+            os: ubuntu-latest
+            needs-cross: false
+          - plat: macos
+            os: macos-latest
+            needs-cross: false
+          - plat: ok3568
+            os: ubuntu-latest
+            needs-cross: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, toolchain pinned)
+        # 与 ci.yml 一致：rust-toolchain.toml 声明 stable，rustup 按文件自动安装
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross + aarch64 target (ok3568 only)
+        if: matrix.needs-cross
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          curl --proto '=https' --tlsv1.2 -sSf https://cross-rs.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build & package (build-all.sh, 缺 thirdparty/签名按契约跳过)
+        # sign=true 时追加 --sign；build-all.sh 缺签名工具/凭据会跳过并提示，不整体失败。
+        run: |
+          args="${{ matrix.plat }}"
+          sign="${{ inputs.sign || 'false' }}"
+          if [ "$sign" = "true" ]; then args="$args --sign"; fi
+          bash scripts/release/build-all.sh $args
+
+      - name: Upload platform artifacts
+        if: matrix.plat != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.plat }}
+          path: dist/${{ matrix.plat }}
+          if-no-files-found: warn # 平台仅出提示未产二进制时不失败（编排器契约）
+
+  release:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    # thirdparty/ok3568 因缺工具链跳过时，其余平台资产仍可发；故即便有 job skipped 也继续。
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist # dist-win/ dist-linux/ dist-macos/ dist-ok3568/
+
+      - name: 打包各平台资产
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for p in win linux macos ok3568; do
+            if [ -d "dist/dist-${p}" ] && [ -n "$(ls -A "dist/dist-${p}" 2>/dev/null)" ]; then
+              ( cd "dist/dist-${p}" && zip -qr "../../release-assets/landesk-${p}.zip" . )
+              echo "  landesk-${p}.zip ready"
+            else
+              echo "  !! landesk-${p}.zip 缺产物（该平台在 build 阶段跳过/无 thirdparty，见其 job 日志）"
+            fi
+          done
+          echo "---- 资产清单 ----"
+          ls -1 release-assets/ 2>/dev/null || true
+
+      - name: 生成版本说明
+        id: notes
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          {
+            echo "LanDesk v${ver}（tag ${GITHUB_REF_NAME}）"
+            echo ""
+            echo "## 资产"
+            echo "各平台 dist/<plat>/ 打包为 landesk-<plat>.zip（controlled + controller 双二进制）。"
+            echo ""
+            echo "## 说明"
+            echo "- 本 release 由 CI 无 thirdparty/ 产出，各平台为**无编码 feature 骨架**二进制。"
+            echo "- 完整编码产物：本地备 thirdparty/（scripts/build-libav/）后跑 scripts/release/build-all.sh。"
+            echo "- 签名：CI 默认未签；需对应平台证书 secrets 后勾 sign 重跑。"
+            echo "- 稳定性/真机：OK3568 真机 72h 跑 scripts/release/stable-72h.sh。"
+          } > release-notes.md
+
+      - name: 创建/更新 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "LanDesk ${{ github.ref_name }}"
+          files: release-assets/*.zip
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
