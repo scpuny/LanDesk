@@ -1,0 +1,65 @@
+# LanDesk CI（M1）
+#
+# 设计要点：
+# - 依赖锁定在仓库内 `vendor/`（directory source，见 .cargo/config.toml），
+#   CI 无需访问 crates.io，构建确定性由 Cargo.lock + vendor 共同保证；
+# - rust-toolchain.toml 固定 stable 通道；
+# - aarch64 交叉编译配置（.cargo/config.toml [target.aarch64-unknown-linux-gnu]）
+#   仅对该 target 门控，x86_64 本地/CI 构建不受影响。
+# - 后续 M3+ 在此追加：clippy、fmt 检查、aarch64 OK3568 交叉编译 job、Tauri 前端构建。
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+  pull_request:
+    branches: [main, dev]
+
+# 同分支重复推送时取消旧 run，节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build & test (${{ matrix.os }})
+    # M1 阶段核心逻辑（lp/crypto/avcodec-wrap/capture）为纯平台无关实现，
+    # 三平台全量回归；平台 API（input 注入、capture 实现）按 feature 门控，
+    # 后续里程碑接入时再按 OS 拆分 job。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, toolchain pinned)
+        # rust-toolchain.toml 声明 stable，rustup 按文件自动安装
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: landesk-${{ matrix.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            landesk-${{ matrix.os }}-
+
+      - name: Build workspace
+        # vendor/ directory source 全本地，无需网络
+        run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      # 占位：M3 起开启
+      # - name: Clippy
+      #   run: cargo clippy --locked --all-targets -- -D warnings
