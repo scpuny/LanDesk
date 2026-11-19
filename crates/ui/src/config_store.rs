@@ -110,10 +110,12 @@ mod tests {
         let p = tmp("save.json");
         let _ = std::fs::remove_file(&p);
         let store = ConfigStore::with_path(&p);
-        let mut c = Config::default();
-        c.device_name = "ok3568-dev".into();
-        c.log_level = LogLevel::Debug;
-        c.relay_enabled = false;
+        let c = Config {
+            device_name: "ok3568-dev".into(),
+            log_level: LogLevel::Debug,
+            relay_enabled: false,
+            ..Default::default()
+        };
         store.save(&c).expect("save");
         let back = Config::load_file(&p).expect("load back");
         assert_eq!(back.device_name, "ok3568-dev");

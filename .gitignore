@@ -8,9 +8,9 @@ node_modules/
 ui/frontend/dist/
 ui/src-tauri/target/
 
-# 构建产物
-dist/
-release/
+# 构建产物（仅仓库根目录的 dist/release 输出，不忽略 scripts/release 源码脚本）
+/dist/
+/release/
 *.log
 landesk-encoder.log
 

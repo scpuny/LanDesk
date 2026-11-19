@@ -41,8 +41,8 @@ impl BackoffPolicy {
         if i >= self.max_attempts {
             return None;
         }
-        let shifted = self.factor.checked_pow(i as u32)?; // 溢出视为耗尽
-        Some(self.base.checked_mul(shifted)?)
+        let shifted = self.factor.checked_pow(i)?; // 溢出视为耗尽
+        self.base.checked_mul(shifted)
     }
 
     /// 完整退避序列（`max_attempts` 项，供 UI 展示 / 断言）。

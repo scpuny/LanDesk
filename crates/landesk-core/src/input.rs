@@ -49,8 +49,8 @@ pub fn apply_input(
             injector.mouse_wheel(w.dx, w.dy)?;
             Ok(DispatchResult::Injected)
         }
-        ControlMsg::KeyDown(k) => Ok(apply_key(injector, &k, true)?),
-        ControlMsg::KeyUp(k) => Ok(apply_key(injector, &k, false)?),
+        ControlMsg::KeyDown(k) => Ok(apply_key(injector, k, true)?),
+        ControlMsg::KeyUp(k) => Ok(apply_key(injector, k, false)?),
         _ => Ok(DispatchResult::Injected),
     }
 }

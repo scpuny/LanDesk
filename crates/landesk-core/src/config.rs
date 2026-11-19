@@ -127,12 +127,14 @@ mod tests {
 
     #[test]
     fn json_roundtrip_preserves_fields() {
-        let mut c = Config::default();
-        c.device_name = "devboard-ok3568".into();
-        c.password = Some("s3cr3t".into());
-        c.preset = EncodePreset::Hd;
-        c.dirty_rect = false;
-        c.log_level = LogLevel::Debug;
+        let c = Config {
+            device_name: "devboard-ok3568".into(),
+            password: Some("s3cr3t".into()),
+            preset: EncodePreset::Hd,
+            dirty_rect: false,
+            log_level: LogLevel::Debug,
+            ..Default::default()
+        };
         let s = c.to_json().expect("serialize");
         let back = Config::from_json(&s).expect("deserialize");
         assert_eq!(back, c, "JSON 往返字段一致");
@@ -141,8 +143,10 @@ mod tests {
     #[test]
     fn save_then_load_file() {
         let path = tmp("config.json");
-        let mut c = Config::default();
-        c.device_name = "mac-mini".into();
+        let c = Config {
+            device_name: "mac-mini".into(),
+            ..Default::default()
+        };
         c.save_file(&path).expect("save");
         let loaded = Config::load_file(&path).expect("load");
         assert_eq!(loaded, c, "落盘后读回一致");

@@ -92,7 +92,7 @@ impl JitterBuffer {
             }
         } else {
             // 中间分片：累积
-            if self.reassembling.as_ref().map_or(true, |pf| pf.seq != d.seq) {
+            if self.reassembling.as_ref().is_none_or(|pf| pf.seq != d.seq) {
                 self.reassembling = Some(PartialFrame {
                     seq: d.seq,
                     kind: d.kind,
@@ -138,6 +138,11 @@ impl JitterBuffer {
     /// 缓冲中帧数。
     pub fn len(&self) -> usize {
         self.ring.len()
+    }
+
+    /// 缓冲是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.ring.is_empty()
     }
 
     /// 清空（重连 / 强制 IDR 时调用）。
