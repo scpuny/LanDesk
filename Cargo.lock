@@ -754,7 +754,9 @@ dependencies = [
 name = "ice"
 version = "0.1.0"
 dependencies = [
+ "rand 0.8.8",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 
@@ -1624,10 +1626,13 @@ dependencies = [
 name = "signaling"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "ice",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite",
  "tracing",
 ]
 
@@ -1636,10 +1641,15 @@ name = "signaling-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "clap",
+ "futures-util",
+ "ice",
  "serde",
  "serde_json",
+ "signaling",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
 ]
