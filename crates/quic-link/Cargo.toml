@@ -9,6 +9,7 @@ description = "LanDesk QUIC 双通道（FR-05）：可靠控制流 + 不可靠�
 [dependencies]
 lp = { workspace = true }
 crypto = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 quinn = { workspace = true }

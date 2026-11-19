@@ -8,7 +8,7 @@ use ice::HoleResult;
 use quic_link::ConnMode;
 
 /// 路径决策结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PathDecision {
     /// 用该路径连（`ConnMode` 喂状态栏 + QUIC 拨号）。
     Use(ConnMode),

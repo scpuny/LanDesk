@@ -36,7 +36,7 @@ pub use server::QuicServer;
 pub use tls::{SelfSigned, TlsError};
 
 /// 连接方式（FR-09.3 状态栏展示）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ConnMode {
     /// 内网直连（mDNS 发现）。
     #[default]

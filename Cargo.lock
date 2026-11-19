@@ -970,6 +970,7 @@ name = "mdns"
 version = "0.1.0"
 dependencies = [
  "mdns-sd",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -1174,6 +1175,7 @@ dependencies = [
  "quinn",
  "rand 0.8.8",
  "rcgen",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
