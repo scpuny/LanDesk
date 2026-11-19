@@ -1,9 +1,28 @@
 //! `mdns` — 局域网发现（FR-01，`_landesk._tcp`，对齐 `docs/protocol.md` §4）。
 //!
-//! M1 占位：设备描述 + TXT 记录结构。M4 接入 mdns-sd 广播/监听。
+//! M4 接入 mdns-sd：
+//! - [`Advertiser`]：受控端广播自己的 [`DeviceAd`]（TXT 记录）；
+//! - [`Listener`]：控制端浏览局域网、收集在线设备、按 TTL 剪枝；
+//! - [`txt`]：`DeviceAd` ↔ TXT 键值对编解码（纯逻辑，可单测）。
+//!
+//! 协议常量：服务类型 [`SERVICE_TYPE`]、完整域 [`SERVICE_DOMAIN`]、默认端口
+//! [`DEFAULT_PORT`]、TTL [`TTL_SECS`]。
 
-/// 服务类型与默认端口（对齐 protocol.md §4）。
+pub mod advertiser;
+pub mod error;
+pub mod listener;
+pub mod txt;
+
+pub use advertiser::Advertiser;
+pub use error::MdnsError;
+pub use listener::Listener;
+pub use txt::{encode, decode, instance_name};
+
+/// 服务类型（protocol.md §4，用于 mdns-sd 浏览/注册的 `ty_domain` 前缀）。
 pub const SERVICE_TYPE: &str = "_landesk._tcp";
+/// 完整 mDNS 域（mdns-sd 要求带 `.local.` 后缀的完整域）。
+pub const SERVICE_DOMAIN: &str = "_landesk._tcp.local.";
+/// 默认 QUIC 监听端口（protocol.md §4，可配置）。
 pub const DEFAULT_PORT: u16 = 52000;
 /// 实例 TTL（秒，对齐 FR-01.4 过期移除）。
 pub const TTL_SECS: u32 = 45;
