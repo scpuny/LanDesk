@@ -1,0 +1,20 @@
+[package]
+name = "ui-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 浏览器 UI 服务（形态A 旁路）：axum 托管 Vue 前端 + REST API，Rust 直接启动 UI，无需 Tauri CLI。"
+
+[dependencies]
+landesk-ui = { workspace = true }
+landesk-core = { workspace = true }
+mdns = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }

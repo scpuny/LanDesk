@@ -755,6 +755,7 @@ name = "ice"
 version = "0.1.0"
 dependencies = [
  "rand 0.8.8",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -2000,6 +2001,23 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "ui-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "landesk-core",
+ "landesk-ui",
+ "mdns",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "unicode-ident"
