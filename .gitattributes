@@ -1,0 +1,6 @@
+# vendor/ 目录是 cargo registry 包的本地展开，含 .crate 原始字节与 CRLF 文件。
+# 标记为二进制（-text）禁止 git 做 CRLF↔LF 转换，保证：
+#   对象库字节 == 工作区字节 == .cargo-checksum.json 记录的 sha256
+# 否则 core.autocrlf=input 会在 add/checkout 间引入行尾不对称，触发
+# "the listed checksum ... has changed" 构建失败（反复踩坑的根因）。
+/vendor/* -text
