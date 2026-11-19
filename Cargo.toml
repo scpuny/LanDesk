@@ -29,6 +29,8 @@ repository = "https://github.com/scpuny/LanDesk"
 # 异步
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
+# 最小化：与 tokio-tungstenite 一致（sink+std，避免拉 futures-macro/futures-channel 等非 vendor 项）。
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # 协议 / 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
