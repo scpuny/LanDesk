@@ -1,18 +1,21 @@
 //! 一键连接编排（FR-01「一键连接」+ FR-05「内网直连」，对齐 `docs/architecture.md` §3 landesk-core）。
 //!
 //! 把已实装的 [`mdns`]（发现/广播）与 [`quic_link`]（QUIC 双通道）+ [`crate::bootstrap`]
-//! （共享密码引导密钥）串成端到端闭环：
+//! （共享密码引导密钥）+ [`crate::auth`]（ECDH+HKDF 会话升级）串成端到端闭环：
 //!
-//! - [`Controller`]：控制端——mdns 发现局域网设备 → 选一个拨号 → bootstrap GCM 握手 →
-//!   产出 [`OneClickSession`]（可收发控制帧 + 视频 Datagram，即「键鼠可用」）；
-//! - [`Controlled`]：受控端——广播自身 → 等待一条 QUIC 连接 → 校验握手 → 产出 [`OneClickSession`]。
+//! - [`Controller`]：控制端——mdns 发现局域网设备 → 选一个拨号 → bootstrap GCM 隧道握手
+//!   → ECDH 前向保密会话升级 → 产出 [`OneClickSession`]（可收发控制帧 + 视频 Datagram，
+//!   即「键鼠可用」）；
+//! - [`Controlled`]：受控端——广播自身 → 等待一条 QUIC 连接 → 密码门禁 + 校验握手 → 产出 [`OneClickSession`]。
 //!
-//! ## 握手（M4 落地简化，ECDH/PBKDF2 会话升级归 M5）
-//! 两侧用「设备ID + 访问密码」独立派生同一 `enc_key` 与方向前缀（[`Bootstrap`]），
-//! 驱动初始握手帧的 AES-GCM。密码错 → `enc_key` 错 → 对端 `AuthRequest` 的 GCM tag
-//! 校验失败 → 编排层落入 [`crate::session::SessionState::AuthFailed`]。`AuthRequest` /
-//! `AuthResult` 中预留的 x25519 / nonce / proof 字段在 M5 填实际 ECDH + PBKDF2 材料
-//! （见各字段 `TODO(M5)` 注释）。
+//! ## 握手（M5 落地，对齐 `docs/protocol.md` §0.2）
+//! 两侧用「设备ID + 访问密码」独立派生同一 bootstrap `enc_key` 与方向前缀
+//! （[`Bootstrap`]），驱动**认证隧道**（GCM 加密握手帧 + 密码门禁）。隧道内交换
+//! 双方 X25519 公钥 + nonce + PBKDF2 密码证明（[`crypto::derive_password`]，不传明文，
+//! NFR-03）；两侧经 [`crate::auth::session_keys`]（ECDH+HKDF）独立派生**前向保密**
+//! 会话密钥，握手成功后会话控制帧 / 视频 Datagram 全部切到它。密码错 → 两侧
+//! bootstrap `enc_key` 不一致 → `AuthRequest` 的 GCM tag 校验失败（或 proof 不匹配
+//! 落入 [`CoreError::Auth`]）→ 会话落入 [`crate::session::SessionState::AuthFailed`]。
 //!
 //! 本模块可被环回测试离线验证（mdns 多播部分 `#[ignore]`，QUIC + 握手部分走 127.0.0.1）。
 
@@ -27,13 +30,17 @@ use quic_link::{LpGcm, QuicClient, QuicConnection, QuicServer};
 
 use crate::error::CoreError;
 use crate::session::SessionState;
-use lp::msg::{AuthRequest, AuthResult, ControlMsg};
+use lp::msg::ControlMsg;
 use lp::wire::ControlFrame;
+
+use crate::auth::{session_keys, ClientHandshake, ServerHandshake};
+use crypto::ecdh::X25519Pub;
+use crypto::derive_password;
 
 /// 环回/测试用的握手时间窗（真实「一键发现」通常 2~5s）。
 pub const DEFAULT_DISCOVER_WINDOW: Duration = Duration::from_secs(3);
 
-/// 由 mDNS 实例名/ID 构造 16B device_id（M4 仅占位，M5 起接真实 128-bit ID）。
+/// 由 mDNS 实例名/ID 构造 16B device_id（M5 起接真实 128-bit ID）。
 fn id_to_device_bytes(id: &str) -> [u8; 16] {
     let mut out = [0u8; 16];
     let b = id.as_bytes();
@@ -42,31 +49,9 @@ fn id_to_device_bytes(id: &str) -> [u8; 16] {
     out
 }
 
-/// M4 占位 `AuthRequest`（ECDH/PBKDF2 字段待 M5 填）。
-fn m4_auth_request(device_id: [u8; 16]) -> AuthRequest {
-    AuthRequest {
-        device_id,
-        // TODO(M5): server_nonce = 受控端随机 32B（协议 §0.2 双向 nonce 互验）
-        server_nonce: [0u8; 32],
-        // TODO(M5): client_nonce = 控制端随机 32B
-        client_nonce: [0u8; 32],
-        // TODO(M5): client_x25519 = 控制端 X25519 公钥（会话密钥协商）
-        client_x25519: [0u8; 32],
-        // TODO(M5): proof = SHA256(PBKDF2(password, cn‖sn))；M4 由 bootstrap GCM 承担密码校验
-        proof: [0u8; 32],
-        flags: 0, // bit0=一次性密码模式（M5 OTP 启用时置位）
-    }
-}
-
-/// M4 占位 `AuthResult`（成功；server 侧字段待 M5 填）。
-fn m4_auth_result_ok() -> AuthResult {
-    AuthResult {
-        code: 0,
-        // TODO(M5): server_x25519 = 受控端 X25519 公钥
-        server_x25519: [0u8; 32],
-        // TODO(M5): server_nonce = 受控端随机 32B
-        server_nonce: [0u8; 32],
-    }
+/// 恒定时间比较两个 32B 缓冲（密码证明校验，避免时序侧信道，NFR-03）。
+fn const_eq32(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// 双通道会话（FR-05「键鼠可用」最小闭环）。
@@ -126,10 +111,10 @@ impl OneClickSession {
             rx,
             mode,
             state: SessionState::Running,
-            // 握手帧已占用 seq=1（C→S 与 S→C 各一帧），session 控制帧从 seq=2 起，
-            // 避免同 (enc_key, prefix) 下 GCM nonce 复用。
-            tx_seq: 1,
-            last_rx_seq: 1,
+            // 会话控制帧在 ECDH 密钥上从零开始（握手帧走 bootstrap 隧道，
+            // 密钥与前缀均独立，nonce 空间不复用）。首帧 seq=1。
+            tx_seq: 0,
+            last_rx_seq: 0,
         }
     }
 
@@ -214,11 +199,14 @@ impl Controller {
         Ok(l.discover_within(window).await?)
     }
 
-    /// 连接发现到的某个设备（FR-01「一键连接」）：QUIC 拨号 + bootstrap 握手。
+    /// 连接发现到的某个设备（FR-01「一键连接」）：QUIC 拨号 + bootstrap 隧道握手 + ECDH 会话升级。
     ///
     /// - `dev`：要连的设备（`dev.ip:dev.port` 即 QUIC 端点）；
     /// - `password`：访问密码（与受控端配置一致）；
     /// - `sni`：TLS SNI（环回传 `"localhost"`；跨机传受控端主机名）。
+    ///
+    /// 密码走 `crypto::derive_password` 计算 32B 证明（不传明文，§0.2），
+    /// 会话密钥经 ECDH+HKDF 前向保密升级（[`session_keys`]）。
     pub async fn connect(
         &self,
         dev: &OnlineDevice,
@@ -226,7 +214,10 @@ impl Controller {
         sni: &str,
     ) -> Result<OneClickSession, CoreError> {
         let addr = self.resolve(dev)?;
+        let device_id = id_to_device_bytes(&dev.ad.id);
+        let proof = derive_password(password, &device_id);
         let bootstrap = crate::bootstrap::derive(&dev.ad.id, password);
+        let hs = ClientHandshake::new();
 
         let conn = self
             .client
@@ -234,12 +225,12 @@ impl Controller {
             .await
             .map_err(|e| CoreError::Quic(e))?;
 
-        // 打开控制流：C 发 AuthRequest(prefix_cs)，读 AuthResult(prefix_sc)。
+        // 认证隧道（bootstrap 密钥）：C 发 AuthReq(prefix_cs)，读 AuthRes(prefix_sc)。
         let cs = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_cs);
         let sc = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_sc);
         let (mut csend, mut crecv) = conn.open_control_stream().await?;
 
-        let req = m4_auth_request(id_to_device_bytes(&dev.ad.id));
+        let req = hs.auth_request(device_id, proof, 0);
         let req_frame = ControlFrame {
             msg: ControlMsg::AuthReq(req),
             seq: 1,
@@ -248,19 +239,29 @@ impl Controller {
         conn.write_control_cipher(&mut csend, &req_cipher)
             .await?;
 
-        // 读受控端 AuthResult。
+        // 读受控端 AuthRes。
         let res_cipher = conn.read_control_cipher(&mut crecv).await?;
         let res_frame = ControlFrame::decrypt(&sc, &bootstrap.enc_key, 1, |s| s > 0, &res_cipher)?;
         match res_frame.msg {
             ControlMsg::AuthRes(r) if r.code == 0 => {
-                debug!(%sni, "一键握手成功，会话 Running");
+                // ECDH 会话升级：用本端私钥 + 对端公钥 + 双 nonce 派生前向保密会话密钥。
+                let sk = session_keys(
+                    &hs.keypair,
+                    &X25519Pub(r.server_x25519),
+                    &hs.client_nonce,
+                    &r.server_nonce,
+                )
+                .map_err(|e| CoreError::Handshake(e.to_string()))?;
+                let s_tx = LpGcm::with_prefix(sk.enc_key, sk.prefix_cs);
+                let s_rx = LpGcm::with_prefix(sk.enc_key, sk.prefix_sc);
+                debug!(%sni, "一键握手成功（ECDH 会话升级），Running");
                 Ok(OneClickSession::established(
                     conn,
                     csend,
                     crecv,
-                    bootstrap.enc_key,
-                    cs, // C 端发出方向 = prefix_cs
-                    sc, // C 端接收方向 = prefix_sc
+                    sk.enc_key,
+                    s_tx, // C 端发出方向 = prefix_cs
+                    s_rx, // C 端接收方向 = prefix_sc
                     quic_link::ConnMode::Inner,
                 ))
             }
@@ -325,9 +326,15 @@ impl Controlled {
         Ok(())
     }
 
-    /// 等待一条连接并完成 bootstrap 握手（密码错 → GCM tag 失败 → [`CoreError::Auth`]）。
+    /// 等待一条连接并完成握手（密码门禁 + ECDH 会话升级）。
+    ///
+    /// 密码错 → 两侧 bootstrap enc_key 不一致 → AuthReq 的 GCM tag 校验直接失败
+    /// → [`CoreError::Auth`]；或 proof 不匹配 → `AuthRes{code=1}` 后关闭。
     pub async fn wait(&self, password: &str) -> Result<OneClickSession, CoreError> {
+        let device_id = id_to_device_bytes(&self.device_id);
+        let expected_proof = derive_password(password, &device_id);
         let bootstrap = crate::bootstrap::derive(&self.device_id, password);
+        let hs = ServerHandshake::new();
 
         let conn = self
             .server
@@ -335,7 +342,7 @@ impl Controlled {
             .await
             .map_err(|e| CoreError::Quic(e))?;
 
-        // 接受控制流：S 读 AuthRequest(prefix_cs)，写 AuthResult(prefix_sc)。
+        // 认证隧道（bootstrap 密钥）：S 读 AuthReq(prefix_cs)，写 AuthRes(prefix_sc)。
         // 密码错 → bootstrap.enc_key 不一致 → 下行这步 tag 校验直接失败。
         let cs = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_cs);
         let sc = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_sc);
@@ -347,22 +354,46 @@ impl Controlled {
                 .map_err(|e| CoreError::Auth(format!("auth request 校验失败: {e}")))?;
 
         match req_frame.msg {
-            ControlMsg::AuthReq(_) => {
-                let res_frame = ControlFrame {
-                    msg: ControlMsg::AuthRes(m4_auth_result_ok()),
+            ControlMsg::AuthReq(r) => {
+                // 密码门禁：恒时比较 PBKDF2 证明（不传/不比明文，§0.2 / NFR-03）。
+                if !const_eq32(&r.proof, &expected_proof) {
+                    let res = ControlFrame {
+                        msg: ControlMsg::AuthRes(hs.auth_result(1)), // code=1 密码错
+                        seq: 1,
+                    };
+                    let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res)?;
+                    conn.write_control_cipher(&mut ssend, &res_cipher)
+                        .await?;
+                    warn!(remote = %conn.remote_addr(), "密码证明不匹配，拒绝");
+                    conn.close(1, b"auth failed");
+                    return Err(CoreError::Auth("password invalid (code=1)".into()));
+                }
+
+                // ECDH 会话升级：本端私钥 + 对端公钥 + 双 nonce。
+                let sk = session_keys(
+                    &hs.keypair,
+                    &X25519Pub(r.client_x25519),
+                    &r.client_nonce,
+                    &hs.server_nonce,
+                )
+                .map_err(|e| CoreError::Handshake(e.to_string()))?;
+                let res = ControlFrame {
+                    msg: ControlMsg::AuthRes(hs.auth_result(0)),
                     seq: 1,
                 };
-                let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res_frame)?;
+                let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res)?;
                 conn.write_control_cipher(&mut ssend, &res_cipher)
                     .await?;
-                debug!(remote = %conn.remote_addr(), "一键握手成功，会话 Running");
+                let s_tx = LpGcm::with_prefix(sk.enc_key, sk.prefix_sc);
+                let s_rx = LpGcm::with_prefix(sk.enc_key, sk.prefix_cs);
+                debug!(remote = %conn.remote_addr(), "一键握手成功（ECDH 会话升级），Running");
                 Ok(OneClickSession::established(
                     conn,
                     ssend,
                     srecv,
-                    bootstrap.enc_key,
-                    sc, // S 端发出方向 = prefix_sc
-                    cs, // S 端接收方向 = prefix_cs
+                    sk.enc_key,
+                    s_tx, // S 端发出方向 = prefix_sc
+                    s_rx, // S 端接收方向 = prefix_cs
                     quic_link::ConnMode::Inner,
                 ))
             }

@@ -1,19 +1,23 @@
-//! M4「双机内网一键连接」环回集成测试（对齐 `docs/protocol.md` §1/§2、`architecture.md` §3）。
+//! M5「双机内网一键连接 + ECDH 会话升级」环回集成测试（对齐 `docs/protocol.md` §0.1/§0.2、
+//! `architecture.md` §3）。
 //!
 //! 走 127.0.0.1 的端到端闭环（**不**起真实 mDNS 守护——多播需网卡，CI 容器常不可用）：
 //! 1. [`Controlled`] 在 127.0.0.1:0 起 QUIC 服务端（自签证书），`wait(password)` 等握手；
 //! 2. [`Controller`] 信任同一自签证书（环回同机可拿到），`connect(dev, password, "localhost")`；
-//! 3. bootstrap GCM 握手：C 发 `AuthRequest`（prefix_cs）→ S 回 `AuthResult`（prefix_sc）；
-//! 4. 会话控制帧双向（Heartbeat / Ping）；
-//! 5. 视频 Datagram 双向（H.264 NALU 明文包）；
-//! 6. 优雅关闭。
+//! 3. bootstrap GCM **认证隧道**：C 发 `AuthRequest`（prefix_cs）→ S 回 `AuthResult`（prefix_sc）；
+//! 4. **ECDH 会话升级**：隧道内交换 X25519 公钥 + nonce + PBKDF2 proof，两侧
+//!    [`session_keys`]（ECDH+HKDF）独立派生前向保密会话密钥，会话控制帧 / 视频 Datagram
+//!    全部切到它（不再用 bootstrap 密钥）；
+//! 5. 会话控制帧双向（Heartbeat / Ping）；
+//! 6. 视频 Datagram 双向（H.264 NALU 明文包）；
+//! 7. 优雅关闭。
 //!
 //! 并发模型与 M3 环路测试一致：双端点各带 UDP drive 任务 + QUIC 流按需通知 →
 //! `multi_thread` runtime + `try_join!` 让控制端与受控端并发，避免顺序死锁。
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use landesk_core::{CoreError, Controlled, Controller, SessionState};
+use landesk_core::{derive_bootstrap, CoreError, Controlled, Controller, SessionState};
 use lp::datagram::VideoDgram;
 use lp::msg::{ControlMsg, Ping};
 use mdns::{DeviceAd, OnlineDevice};
@@ -66,6 +70,12 @@ async fn oneclick_loopback_roundtrip() {
     assert_eq!(s_session.state(), SessionState::Running);
     assert_eq!(c_session.remote_addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert_eq!(s_session.remote_addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+    // ECDH 会话升级：会话密钥必须是前向保密的 ECDH 派生值，**不同于**
+    // bootstrap 认证隧道密钥（隧道只用于握手帧 + 密码门禁）。双端一致。
+    let bootstrap = derive_bootstrap(DEV_ID, PASSWORD);
+    assert_ne!(c_session.enc_key, bootstrap.enc_key, "会话密钥应升级离 bootstrap 密钥");
+    assert_eq!(c_session.enc_key, s_session.enc_key, "两侧 ECDH 派生会话密钥一致");
 
     // ---- 会话控制帧双向：client 发 Heartbeat，server 收后回 Ping ----
     let (client_got, server_got) = tokio::try_join!(
@@ -129,7 +139,8 @@ async fn oneclick_loopback_roundtrip() {
     s_session.close(0, b"done");
 }
 
-/// 密码错 → bootstrap enc_key 不一致 → 受控端 AuthRequest GCM tag 校验失败 → `Auth` 错误。
+/// 密码错 → 两侧 bootstrap `enc_key` 不一致（认证隧道密钥由「设备ID + 密码」派生）
+/// → 受控端解不开 `AuthRequest` 的 GCM tag（或 PBKDF2 proof 不匹配）→ `Auth` 错误。
 #[tokio::test(flavor = "multi_thread")]
 async fn oneclick_wrong_password_rejected() {
     let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
