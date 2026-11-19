@@ -9,11 +9,20 @@ use std::path::{Path, PathBuf};
 use landesk_core::config::{Config, ConfigError};
 
 /// 配置存储错误。
+///
+/// 手写 `Serialize`（序列化为错误字符串）：Tauri 命令出参的 error 类型须可序列化，
+/// 而变体包裹的 `std::io::Error` / `serde_json::Error` 本身非 `Serialize`，derive 不适用。
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     /// 底层 IO / JSON 失败。
     #[error("config store: {0}")]
     Core(#[from] ConfigError),
+}
+
+impl serde::Serialize for StoreError {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_string())
+    }
 }
 
 /// 默认配置路径（`~/.config/landesk/config.json`，§5.1；`$XDG_CONFIG_HOME` 优先）。

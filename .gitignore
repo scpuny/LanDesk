@@ -7,6 +7,11 @@ target/
 node_modules/
 ui/frontend/dist/
 ui/src-tauri/target/
+# Tauri 壳本地 vendor（522 crate，770MB）：由 ui/src-tauri/scripts_vendor_tauri.py 生成，
+# 壳自成独立 [workspace]，不在主仓 CI 离线门内，故不入库（避免 8× 仓库体积）。
+ui/src-tauri/vendor/
+# tauri-build 生成物（schemas）
+ui/src-tauri/gen/
 
 # 构建产物（仅仓库根目录的 dist/release 输出，不忽略 scripts/release 源码脚本）
 /dist/

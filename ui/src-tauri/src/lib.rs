@@ -27,7 +27,7 @@ pub mod state {
 /// 配置页：读或首次生成默认模板（FR-08）。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn config_load_or_init() -> Result<landesk_ui::Config, landesk_ui::StoreError> {
+fn config_load_or_init() -> Result<landesk_ui::Config, landesk_ui::StoreError> {
     let store = landesk_ui::ConfigStore::new();
     commands::config_load_or_init(&store)
 }
@@ -35,7 +35,7 @@ pub fn config_load_or_init() -> Result<landesk_ui::Config, landesk_ui::StoreErro
 /// 配置页：保存（FR-08）。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn config_save(c: landesk_ui::Config) -> Result<(), landesk_ui::StoreError> {
+fn config_save(c: landesk_ui::Config) -> Result<(), landesk_ui::StoreError> {
     let store = landesk_ui::ConfigStore::new();
     commands::config_save(&store, &c)
 }
@@ -43,8 +43,8 @@ pub fn config_save(c: landesk_ui::Config) -> Result<(), landesk_ui::StoreError> 
 /// 设备列表（FR-01.2/01.4）：入参在线设备 + 当前 epoch 秒，出参可序列化行。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn device_list(
-    devices: Vec<landesk_ui::OnlineDevice>,
+fn device_list(
+    mut devices: Vec<landesk_ui::OnlineDevice>,
     now_epoch_secs: u64,
 ) -> Vec<landesk_ui::DeviceRow> {
     commands::device_list(&mut devices, now_epoch_secs)
@@ -53,7 +53,7 @@ pub fn device_list(
 /// 重连指示器（FR-05.4）：按已用尝试数出「下次」视图。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn reconnect_view(used_attempts: u32) -> Option<landesk_ui::ReconnectView> {
+fn reconnect_view(used_attempts: u32) -> Option<landesk_ui::ReconnectView> {
     let mut s = landesk_ui::ReconnectScheduler::default_policy();
     for _ in 0..used_attempts {
         s.step();
@@ -64,7 +64,7 @@ pub fn reconnect_view(used_attempts: u32) -> Option<landesk_ui::ReconnectView> {
 /// 连接路径决策（FR-05/FR-11）：内网→P2P→中继→NoPath。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn choose_path(
+fn choose_path(
     inner_found: bool,
     hole: landesk_ui::HoleResult,
     relay_enabled: bool,

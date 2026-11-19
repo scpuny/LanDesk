@@ -28,7 +28,7 @@ pub const DEFAULT_PORT: u16 = 52000;
 pub const TTL_SECS: u32 = 45;
 
 /// 广播的设备信息（TXT 记录内容，protocol.md §4 表格）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeviceAd {
     /// 设备ID（12 位 hex，16B 的 12 位缩写）。
     pub id: String,
@@ -52,7 +52,7 @@ impl DeviceAd {
 }
 
 /// 在线设备（控制端监听结果）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OnlineDevice {
     pub ad: DeviceAd,
     pub ip: String,

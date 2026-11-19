@@ -1,0 +1,27 @@
+# LanDesk Tauri 壳专用 cargo 配置（本地 vendor 目录源，离线可构建真 GUI 窗体）。
+#
+# ★ 背景：主仓 /LanDesk/.cargo/config.toml 设
+#     [source.crates-io] replace-with = "vendored"（主仓 vendor/，只含主仓依赖）。
+#     tauri 全家桶不在主仓 vendor，须为壳单独准备一份 vendor。
+#
+# ★ 为什么不用 registry（USTC/crates.io）源：
+#     本环境 LSM（seccomp/bpf，内核 lsm 列表含 bpf）拦截 cargo registry 解包时
+#     设 mtime 的 futimens(fd) 系统调用 → `failed to set mtime ... EPERM`。
+#     路径式 utimensat 放行、fd 式 futimens 被拦（已实测）。因此凡走 registry
+#     unpack 的构建（含 --offline）都会卡死。
+#
+# ★ 解法：改用本地 **directory source**（./vendor），cargo 直接读目录、
+#     不 tar 解包、不设 mtime → 彻底绕开 futimens。vendor/ 由
+#     `python3 scripts_vendor_tauri.py` 生成（复用主仓 vendor.py 逻辑：
+#     symlink 解引用 + .cargo-checksum.json），.crate 全部来自 USTC registry cache。
+#     相对路径，cargo 以本 config.toml 所在目录（ui/src-tauri）解析。
+#
+# ★ 影响范围：仅 `ui/src-tauri` 下 cargo 命令（本壳独立 [workspace]，不碰主仓离线门）。
+#   主仓 `cargo build --offline --locked` 仍走 /LanDesk/.cargo/config.toml（主仓 vendor/）。
+#   本壳构建：`CARGO_NET_OFFLINE=true cargo build --features tauri`（全离线，无需联网）。
+
+[source.crates-io]
+replace-with = "vendored"
+
+[source.vendored]
+directory = "vendor"

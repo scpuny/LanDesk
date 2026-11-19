@@ -6,7 +6,7 @@
 //! 业务类型全部经 `landesk-ui` 便捷 re-export 取到（壳只依赖内核一个 crate）。
 
 use landesk_ui::{
-    Config, ConfigStore, ConnMode, CoreEvent, DeviceRow, HoleResult, OnlineDevice, PathDecision,
+    Config, ConfigStore, CoreEvent, DeviceRow, HoleResult, OnlineDevice, PathDecision,
     ReconnectScheduler, ReconnectView, StatusBarModel, decide_path, device_rows, view_of,
 };
 
@@ -43,6 +43,7 @@ pub fn choose_path(inner_found: bool, hole: &HoleResult, relay_enabled: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use landesk_ui::ConnMode;
 
     #[test]
     fn path_decision_smoke() {
