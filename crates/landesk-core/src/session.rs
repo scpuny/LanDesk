@@ -77,6 +77,7 @@ mod tests {
         s = s.transition(SessionState::Reconnecting).unwrap();
         s = s.transition(SessionState::Running).unwrap();
         s = s.transition(SessionState::Closed).unwrap();
+        assert!(s.is_terminal(), "Closed 应为终态");
     }
 
     #[test]

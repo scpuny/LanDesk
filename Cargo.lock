@@ -871,6 +871,8 @@ dependencies = [
  "lp",
  "mdns",
  "quic-link",
+ "quinn",
+ "sha2",
  "signaling",
  "thiserror 1.0.69",
  "tokio",

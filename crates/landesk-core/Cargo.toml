@@ -17,6 +17,14 @@ ice = { workspace = true }
 signaling = { workspace = true }
 mdns = { workspace = true }
 clipboard = { workspace = true }
+quinn = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+mdns = { workspace = true }
+lp = { workspace = true }
+quic-link = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
