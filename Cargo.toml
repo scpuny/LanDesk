@@ -49,6 +49,8 @@ quinn-proto = "0.11"
 tokio-tungstenite = "0.24"
 axum = { version = "0.7", features = ["ws"] }
 mdns-sd = "0.10"
+# mDNS 事件通道（mdns-sd 的 receiver 类型）
+flume = "0.11"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
