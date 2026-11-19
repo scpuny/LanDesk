@@ -1,0 +1,17 @@
+[package]
+name = "input"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 键鼠注入（受控端）：LKC 映射到平台注入 API。M1 占位。"
+
+[dependencies]
+lp = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+windows = []
+linux = []
+macos = []

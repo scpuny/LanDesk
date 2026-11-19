@@ -1,0 +1,16 @@
+[package]
+name = "signaling"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 轻信令客户端（FR-10）。M1 占位，M6 接入。"
+
+[dependencies]
+ice = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

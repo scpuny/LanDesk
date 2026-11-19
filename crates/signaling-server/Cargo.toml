@@ -1,0 +1,16 @@
+[package]
+name = "signaling-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 可选组件：轻信令服务（FR-10，独立二进制，axum+ws，内存存储）。M1 占位。"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,3 @@
+# 锁定 stable 通道；aarch64 目标按需 rustup target add，避免默认强制下载。
+[toolchain]
+channel = "stable"

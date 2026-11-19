@@ -1,0 +1,17 @@
+[package]
+name = "capture"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 屏幕采集：trait + 脏矩形检测（平台实现按 feature 门控，M1 先落逻辑层）"
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+# 平台采集实现按需开启；默认无（纯逻辑可跨平台测试）
+windows = []
+linux = []
+macos = []

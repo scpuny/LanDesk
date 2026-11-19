@@ -29,7 +29,7 @@ enc_key(32B) = SHA256(master_key || b"enc")   // 会话对称加密密钥
 ```
 
 - 会话密钥 ECDH（X25519）协商一次，整段会话复用 `enc_key`；重连（RECONNECT）重新走握手换新密钥。
-- GCM 96-bit nonce 构造：`nonce = rand8(8B, 会话随机前缀) || seq(8B)`
+- GCM 96-bit nonce 构造：`nonce = prefix(4B, 会话随机前缀) || seq(8B, LE)`（合计恰好 96-bit，AES-GCM 固定要求）
   - 控制流 seq = 该流单调递增报文计数（u64，LE）
   - 视频 Datagram seq = 帧序号（u32 左扩展 4B 零 + u32 分片号）
   - 发送端保证同 nonce 永不复用；接收端检测到 nonce 重复直接断会话（安全告警日志）。

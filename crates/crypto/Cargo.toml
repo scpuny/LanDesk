@@ -1,0 +1,18 @@
+[package]
+name = "crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 密钥与鉴权原语：X25519 ECDH、HKDF、AES-256-GCM、PBKDF2 密码派生。"
+
+[dependencies]
+x25519-dalek = { workspace = true }
+aes-gcm = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+pbkdf2 = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
