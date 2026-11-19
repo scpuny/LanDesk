@@ -105,36 +105,40 @@ build_rust() {
   # aarch64 需要裁剪 libav 交叉产物
   if [[ "${plat}" == ok3568 ]]; then
     if [[ ! -d "${AV_AARCH64}" ]]; then
-      echo "!! [ok3568] 缺裁剪 libav aarch64 产物 ${AV_AARCH64}。"
-      echo "   请先跑：CC=aarch64-linux-gnu-gcc ./scripts/build-libav/build-aarch64-ok3568.sh"
-      echo "   或 FFMPEG_SRC 指向源码；此处跳过 aarch64 编译。"
-      return 0
+      echo "!! [ok3568] 缺裁剪 libav aarch64 产物 ${AV_AARCH64}（thirdparty/ 未备）。"
+      echo "   降级为**无编码骨架**：avcodec-wrap 各编码器 feature 当前为占位空标记"
+      echo "   （无 build.rs/FFI 链接点，不拉 thirdparty），仍可 cross 编出可运行骨架；"
+      echo "   完整编码产物需先跑 CC=aarch64-linux-gnu-gcc ./scripts/build-libav/build-aarch64-ok3568.sh。"
+    else
+      export LAVF_ROOT="${AV_AARCH64}"
+      export OPENH264_ROOT="${AV_AARCH64}"
     fi
-    export LAVF_ROOT="${AV_AARCH64}"
-    export OPENH264_ROOT="${AV_AARCH64}"
   else
     if [[ ! -d "${AV_X86}" ]]; then
-      echo "!! [${plat}] 缺裁剪 libav x86_64 产物 ${AV_X86}。"
-      echo "   请先跑：./scripts/build-libav/build-x86_64.sh（需 FFMPEG_SRC 指向源码）"
-      echo "   若本机无 ffmpeg 源码，可仅构建无编码 feature 的受控端骨架做冒烟，"
-      echo "   但完整编码链路产物需先备 thirdparty。此处跳过该平台编码产物。"
-      return 0
+      echo "!! [${plat}] 缺裁剪 libav x86_64 产物 ${AV_X86}（thirdparty/ 未备）。"
+      echo "   降级为**无编码骨架**：avcodec-wrap feature 当前为占位空标记（不链接 thirdparty/FFI），"
+      echo "   仍可编出 controlled/controller 可运行骨架；完整编码产物需先备"
+      echo "   thirdparty（./scripts/build-libav/build-x86_64.sh，需 FFMPEG_SRC 指向源码）。"
+      # 不导出 LAVF_ROOT/OPENH264_ROOT，继续编骨架（缺 thirdparty 时真 FFI 后端本就不存在）
+    else
+      export LAVF_ROOT="${AV_X86}"
+      export OPENH264_ROOT="${AV_X86}"
     fi
-    export LAVF_ROOT="${AV_X86}"
-    export OPENH264_ROOT="${AV_X86}"
   fi
 
   if [[ "${use_cross}" == "1" ]]; then
     # cross 容器（scripts/cross-ok3568/Dockerfile）或本机 aarch64-linux-gnu 工具链
     if command -v cross >/dev/null 2>&1; then
       echo "== [${plat}] cross build --target ${target} --features ${feats}"
-      cross build --release --target "${target}" \
+      cross build --release --locked --target "${target}" \
         -p controlled -p controller -p relay-server -p signaling-server \
+        -p capture -p avcodec-wrap \
         --features "${feats}"
     elif command -v "${target%%-*}"-gcc- >/dev/null 2>&1 || command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
       echo "== [${plat}] 本机交叉工具链 build --target ${target} --features ${feats}"
-      cargo build --release --target "${target}" \
+      cargo build --release --locked --target "${target}" \
         -p controlled -p controller -p relay-server -p signaling-server \
+        -p capture -p avcodec-wrap \
         --features "${feats}"
     else
       echo "!! [${plat}] 无 cross 容器也无 aarch64-linux-gnu-gcc，跳过。"
@@ -143,10 +147,13 @@ build_rust() {
     fi
   else
     echo "== [${plat}] cargo build --release --features ${feats}"
-    cargo build --release -p controlled -p controller \
+    # -p capture -p avcodec-wrap：feature 属主 crate 须进选择集，否则
+    # `pkg/feat` 路径语法解析不到（controlled/controller 只依赖 landesk-core）。
+    cargo build --release --locked -p controlled -p controller \
+      -p capture -p avcodec-wrap \
       --features "${feats}"
     # 可选组件单独编（不拉平台 feature）
-    cargo build --release -p relay-server -p signaling-server || echo "   (可选组件编译失败，跳过)"
+    cargo build --release --locked -p relay-server -p signaling-server || echo "   (可选组件编译失败，跳过)"
   fi
 
   # 归集产物到 dist/<plat>/
