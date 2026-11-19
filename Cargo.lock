@@ -872,6 +872,7 @@ dependencies = [
  "mdns",
  "quic-link",
  "quinn",
+ "rand 0.8.8",
  "sha2",
  "signaling",
  "thiserror 1.0.69",

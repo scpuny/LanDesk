@@ -6,15 +6,26 @@
 //! M4「双机内网一键连接」落地 [`bootstrap`]（共享密码引导密钥）与 [`oneclick`]
 //! （mdns 发现/广播 → QUIC 双通道 → bootstrap GCM 握手的端到端编排，产出
 //! [`OneClickSession`]，即「键鼠可用」最小闭环）。
+//!
+//! M5「鉴权 + 双向剪贴板 + 注入全链路」在其上落地：[`auth`]（ECDH+HKDF 前向保密
+//! 会话升级，M4 的 bootstrap 密钥退为认证隧道）、[`input`]（控制帧 → 受控端
+//! 注入器全链路，FR-06）、[`clipboard_flow`]（双向剪贴板分段传输 + SHA 校验，
+//! FR-07）。
 
 pub mod session;
 pub mod config;
 pub mod events;
 pub mod bootstrap;
+pub mod auth;
 pub mod error;
 pub mod oneclick;
+pub mod input;
+pub mod clipboard_flow;
 
+pub use auth::{ClientHandshake, ServerHandshake, SessionKeys, session_keys};
 pub use bootstrap::{derive as derive_bootstrap, Bootstrap};
+pub use clipboard_flow::{ClipboardFlow, receive_clipboard};
 pub use error::CoreError;
+pub use input::{apply_input, DispatchResult};
 pub use oneclick::{Controlled, Controller, OneClickSession};
 pub use session::SessionState;
