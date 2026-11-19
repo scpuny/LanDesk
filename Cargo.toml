@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lp",
+    "crates/crypto",
+    "crates/avcodec-wrap",
+    "crates/capture",
+    "crates/input",
+    "crates/quic-link",
+    "crates/ice",
+    "crates/signaling",
+    "crates/mdns",
+    "crates/clipboard",
+    "crates/landesk-core",
+    "crates/signaling-server",
+    "apps/controlled",
+    "apps/controller",
+    "apps/relay-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["LanDesk Team"]
+license = "MIT"
+repository = "https://github.com/scpuny/LanDesk"
+
+[workspace.dependencies]
+# 异步
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+# 协议 / 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+# 密码学
+# static_secrets：启用 `StaticSecret`（可复用私钥），供 ECDH 密钥对持有私钥并反复派生共享密钥。
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+pbkdf2 = "0.12"
+rand = "0.8"
+# QUIC
+quinn = "0.11"
+quinn-proto = "0.11"
+# 网络 / 信令
+tokio-tungstenite = "0.24"
+axum = { version = "0.7", features = ["ws"] }
+mdns-sd = "0.10"
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 错误
+thiserror = "1"
+anyhow = "1"
+# CLI
+clap = { version = "4", features = ["derive"] }
+# 内部 crate
+lp = { path = "crates/lp" }
+crypto = { path = "crates/crypto" }
+avcodec-wrap = { path = "crates/avcodec-wrap" }
+capture = { path = "crates/capture" }
+input = { path = "crates/input" }
+quic-link = { path = "crates/quic-link" }
+ice = { path = "crates/ice" }
+signaling = { path = "crates/signaling" }
+mdns = { path = "crates/mdns" }
+clipboard = { path = "crates/clipboard" }
+landesk-core = { path = "crates/landesk-core" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# 单文件二进制目标（NFR-05）
+panic = "abort"

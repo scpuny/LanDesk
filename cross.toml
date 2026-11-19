@@ -1,0 +1,5 @@
+# cross 容器配置（aarch64 交叉编译，docs/ops/ok3568-build.md §5）
+# 用法：docker build -f scripts/cross-ok3568/Dockerfile -t landesk-cross .
+#       docker run --rm -it -v $(pwd):/src -v ~/.cargo:/root/.cargo landesk-cross cargo build --release
+build:
+  image: landesk-cross:latest

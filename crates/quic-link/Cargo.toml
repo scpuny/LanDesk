@@ -1,0 +1,14 @@
+[package]
+name = "quic-link"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk QUIC 双通道（FR-05）：可靠控制流 + 不可靠视频 Datagram。M1 占位，M3 接入 Quinn。"
+
+[dependencies]
+lp = { workspace = true }
+crypto = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,22 @@
+[package]
+name = "avcodec-wrap"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 统一编码器封装（FR-04）：trait + 降级链 + 异常重置。libav FFI 按 feature 门控，M1 先落降级逻辑可单测。"
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+lp = { workspace = true }
+
+[features]
+# 各编码器后端按需开启；默认全软编兜底逻辑（无 FFI 即可编译测试）
+qsv = []
+nvenc = []
+amf = []
+v4l2m2m = []
+videotoolbox = []
+openh264 = []
+default = []

@@ -1,0 +1,22 @@
+[package]
+name = "landesk-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 会话编排层（无 GUI，tokio）：会话状态机 + 采集→编码→QUIC 流水线。M1 占位。"
+
+[dependencies]
+lp = { workspace = true }
+crypto = { workspace = true }
+avcodec-wrap = { workspace = true }
+capture = { workspace = true }
+input = { workspace = true }
+quic-link = { workspace = true }
+ice = { workspace = true }
+signaling = { workspace = true }
+mdns = { workspace = true }
+clipboard = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

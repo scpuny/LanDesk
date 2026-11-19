@@ -1,0 +1,11 @@
+[package]
+name = "mdns"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 局域网发现（FR-01，_landesk._tcp）。M1 占位，M4 接入 mdns-sd。"
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }

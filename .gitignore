@@ -25,6 +25,7 @@ thirdparty/
 .vscode/
 .idea/
 .DS_Store
+.Trash-*/
 
 # 内部工作区数据
 .workbuddy/
