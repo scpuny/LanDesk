@@ -3,4 +3,10 @@
 #   对象库字节 == 工作区字节 == .cargo-checksum.json 记录的 sha256
 # 否则 core.autocrlf=input 会在 add/checkout 间引入行尾不对称，触发
 # "the listed checksum ... has changed" 构建失败（反复踩坑的根因）。
+#
+# ★ `*` 不跨目录分隔符：`/vendor/*` 只覆盖 vendor/ 一层直挂文件，嵌套子目录
+#   （vendor/x.y.z/build.rs、vendor/x.y.z/.github/...）不受保护 → 跨平台
+#   checkout 时（如 Windows autocrlf=true）仍被转 CRLF，再次打爆 checksum。
+#   用 `vendor/**`（跨全部子目录）真正递归保护整棵 vendor 树。
 /vendor/* -text
+vendor/** -text

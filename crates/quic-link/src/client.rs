@@ -6,12 +6,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use quinn::rustls::crypto::CryptoProvider;
 use quinn::rustls::RootCertStore;
 use quinn::{ClientConfig, Endpoint, TransportConfig};
 
 use crate::conn::QuicConnection;
 use crate::error::QuicLinkError;
 use crate::gcm::LpGcm;
+use crate::insecure;
 use crate::tls::SelfSigned;
 
 /// QUIC 客户端。
@@ -34,6 +36,28 @@ impl QuicClient {
 
         let mut client_config = ClientConfig::with_root_certificates(Arc::new(roots))
             .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
+        client_config.transport_config(Arc::new(TransportConfig::default()));
+
+        let mut endpoint =
+            Endpoint::client(bind).map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
+        endpoint.set_default_client_config(client_config);
+
+        Ok(Self { endpoint })
+    }
+
+    /// 创建「信任任意证书」客户端（LAN 跨机一键连接，FR-01）。
+    ///
+    /// 跳过证书链/hostname 校验（内网信任域假设），保留 TLS1.3 握手签名校验；
+    /// 端到端机密性由会话 GCM（bootstrap 密码）兜底。**外网场景禁用**——
+    /// 须换正式 CA 或证书交换（M6/M7）。`provider` 为 quinn 内置 ring provider。
+    pub fn insecure(
+        bind: SocketAddr,
+        provider: &CryptoProvider,
+    ) -> Result<Self, QuicLinkError> {
+        let client_config =
+            insecure::insecure_client_config(provider)
+                .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
+        let mut client_config = client_config;
         client_config.transport_config(Arc::new(TransportConfig::default()));
 
         let mut endpoint =

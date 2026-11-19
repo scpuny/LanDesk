@@ -6,6 +6,7 @@
 //!
 //! 模块划分：
 //! - [`tls`]：rcgen 自签证书（内网直连 / 环路测试）；
+//! - [`insecure`]：信任任意证书的 QUIC 客户端验证器（LAN 跨机一键连接，保留 TLS1.3 签名校验）；
 //! - [`server`] / [`client`]：端点封装；
 //! - [`conn`]：双通道连接句柄 [`QuicConnection`]；
 //! - [`gcm`]：`crypto::GcmSession` 语义的 `lp::wire::Gcm` 适配器 [`LpGcm`]；
@@ -14,6 +15,7 @@
 pub mod conn;
 pub mod error;
 pub mod gcm;
+pub mod insecure;
 pub mod server;
 pub mod client;
 pub mod tls;
@@ -22,6 +24,7 @@ pub use client::QuicClient;
 pub use conn::QuicConnection;
 pub use error::QuicLinkError;
 pub use gcm::LpGcm;
+pub use insecure::TrustAny;
 pub use server::QuicServer;
 pub use tls::{SelfSigned, TlsError};
 
