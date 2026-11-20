@@ -605,7 +605,9 @@ jobs:
           if git merge-base --is-ancestor "${GITHUB_REF_NAME}" HEAD; then
             echo "::notice::${GITHUB_REF_NAME} 已在 main 中，跳过合并"
           else
-            git merge --no-ff "${GITHUB_REF_NAME}" \
+            # main 只接受 release tag；版本文件（Cargo.toml / tauri.conf.json / Cargo.lock）
+            # 在 dev 与 main 上都会改版本行，合并时以 tag（本次发布内容）为准。
+            git merge --no-ff -X theirs "${GITHUB_REF_NAME}" \
               -m "release: merge ${GITHUB_REF_NAME} into main"
             git push origin main
             echo "::notice::main 已同步到 ${GITHUB_REF_NAME}"

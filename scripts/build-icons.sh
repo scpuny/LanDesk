@@ -38,6 +38,9 @@ png 256 "${ICON_DIR}/128x128@2x.png"
 png 256 "${ICON_DIR}/icon.png"
 png 512 "${ICON_DIR}/icon-512.png"
 png 1024 "${ICON_DIR}/icon-1024.png"
+# macOS 1024 必须以 @2x 结尾（512pt@2x），否则 tauri-bundler 的 icns
+# 生成器认为 (1024,1024,density=1) 无匹配类型，导致 dmg 构建失败。
+png 1024 "${ICON_DIR}/icon-1024@2x.png"
 
 # --- 2. 多尺寸 ICO（Windows 任务栏/资源管理器各尺寸）---
 python3 - "${ICON_DIR}" <<'PY'
