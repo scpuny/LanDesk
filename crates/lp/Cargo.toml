@@ -1,0 +1,19 @@
+[package]
+name = "lp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 协议库：控制帧/视频Datagram编解码、NALU分片、抖动缓冲。纯逻辑、无平台依赖。"
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+# 仅测试用（EncodePreset 整数/旧字符串 serde 形状锁定）：验证 JSON 往返，不进运行时依赖。
+serde_json = { workspace = true }

@@ -1,0 +1,24 @@
+[package]
+name = "ui-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 浏览器 UI 服务（形态A 旁路）：axum 托管 Vue 前端 + REST API，Rust 直接启动 UI，无需 Tauri CLI。"
+
+[dependencies]
+landesk-ui = { workspace = true }
+landesk-core = { workspace = true }
+mdns = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# SSE 视频推流（P2②）：把 `SessionManager` 视频泵的 `Receiver` 转成 `axum` SSE 事件流。
+# `futures-util`（sink+std，主仓 vendor 已含 0.3.34，经 axum 传递引入）仅取 `StreamExt` 适配
+# `mpsc::Receiver` → `Stream`，不引新 crate，离线 vendor 门纯净。
+futures-util = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,28 @@
+{
+  "files": {
+    ".cargo_vcs_info.json": "91992c2d6b19f57f0065f94238ad108cd73095cf0d75f11d2af539c9a6e656f3",
+    ".github/workflows/rust.yml": "c4b72747588b86b609148b9c1947e5c8eed95e26b3dabd3b53da7647e61a1ae2",
+    ".github/workflows/security.yml": "089ff96673fc2c826d8c794973fdae531406663dd5dfa2e8a9b2fd83511759e4",
+    ".mailmap": "dd72318107ef4d669ca6afc82ec65fd16e3765144794627ec195bb597458c137",
+    "Cargo.lock": "ac16579b67eefe5582ad0b15039729afbe7e7b348d1cd36e0838e66497936f88",
+    "Cargo.toml": "bec3b1248d39cbaa31f04baba57650b70540ce6458d81e0f83c7bd178d7636f2",
+    "Cargo.toml.orig": "618b299b682e2a6c7ae06a0139159b72ccc330d268ceb4874bf12c2157493041",
+    "LICENSE.md": "90d7e062634054e6866d3c81e6a2b3058a840e6af733e98e80bdfe1a7dec6912",
+    "readme.md": "f81dc556ac004f5ed712b31c9767a9b064b59e5daec402b19f3a51ef634ffe6a",
+    "src/byteorder.rs": "b8f6085cd41473645e3a9ca9322977c3bb1486c0c93221571e0a335ad56dfcd0",
+    "src/config/endian.rs": "a3ac48340551da355228176b4bd03049cbf9800769ffd507a3807cb0f2a47928",
+    "src/config/int.rs": "e5d3c24714f10982f7180c5c0314c50b89e4070b129eeda67d4eec1eb2b30157",
+    "src/config/legacy.rs": "ffb22a1432f395dfbb869fddec236c59e1f61f1454cf73c27a0430619283718c",
+    "src/config/limit.rs": "d3b9efb772d1c86b4d88fa2e847d41df13e4c45a094e6bf7c4bf0b44632c5c91",
+    "src/config/mod.rs": "9a938d959003646be268b117af7511f6012c1afb0078868d2b5a1b2fd7142f3d",
+    "src/config/trailing.rs": "75a038f504dfe85b95243adaab5244e706b6398139ac4d88b2b88fa3fdb38762",
+    "src/de/mod.rs": "adf97b1780d7bb6b86f95ebabdfe15001924bec129b9a77001862a317049dbfb",
+    "src/de/read.rs": "6a2a173cc15cb82cefac6fea73445e35b78e68ac21418031bd6f6fddd4aa942e",
+    "src/error.rs": "ce6617bf8523392e6fc8b853b7768899a229b6b78dabc2918c0e2dd3f846aa01",
+    "src/internal.rs": "28da07c4cdec33b8eb5340be6a951bcea3e5113c09794a016c8f99c9d9bb275f",
+    "src/lib.rs": "4d9f596fc3b54dc3e753fb83dcd077502baa0911ce8416cf50423b73eaff4b1e",
+    "src/ser/mod.rs": "f084d5731d3e89162d35f51f5b5848d1c59ce5b4ba0bea60b13aa328fa13b2bc",
+    "tests/test.rs": "29422cc78264391e8c30f75de8890087363bc29cf82295e97b7c2b7ce57815fc"
+  },
+  "package": "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+}

@@ -1,0 +1,14 @@
+[package]
+name = "controller"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 控制端（独立单文件二进制，形态A）。M1 占位。"
+
+[dependencies]
+landesk-core = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

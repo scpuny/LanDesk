@@ -1,0 +1,18 @@
+[package]
+name = "mdns"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 局域网发现（FR-01，_landesk._tcp）：mdns-sd 广播/监听 + TTL 剪枝。"
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# 设备模型经 GUI（Tauri 命令入参）出参时须可序列化（M8/M9，serde 已在主仓 vendor）
+serde = { workspace = true }
+# M4 接入：mDNS 广播/监听（FR-01，_landesk._tcp）
+# 注：事件通道类型经 `mdns_sd::Receiver`（flume re-export）访问，无需直接依赖 flume
+# （直接依赖 flume 会激活其默认 feature eventual-fairness → 引入 nanorand，偏离 lock）。
+mdns-sd = { workspace = true }
+tokio = { workspace = true }

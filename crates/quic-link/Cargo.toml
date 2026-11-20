@@ -1,0 +1,22 @@
+[package]
+name = "quic-link"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk QUIC 双通道（FR-05）：可靠控制流 + 不可靠视频 Datagram。M1 占位，M3 接入 Quinn。"
+
+[dependencies]
+lp = { workspace = true }
+crypto = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+quinn = { workspace = true }
+rcgen = { workspace = true }
+tracing = { workspace = true }
+# 密码学（gcm.rs 适配器直用）
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+# 视频 Datagram 字节载体（conn.rs send/recv）
+bytes = { workspace = true }

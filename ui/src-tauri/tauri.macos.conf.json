@@ -1,0 +1,16 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "LanDesk",
+        "width": 980,
+        "height": 680,
+        "minWidth": 720,
+        "minHeight": 480,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

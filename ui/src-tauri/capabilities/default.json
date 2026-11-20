@@ -1,0 +1,17 @@
+{
+  "$schema": "gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗 + 会话窗能力：自绘标题栏（decorations:false）拖拽 + 窗口控制键。Tauri v2 中 data-tauri-drag-region / startDragging 必须显式授 core:window:allow-start-dragging，否则静默失效。main = 常规框架窗（远程控制/我的设备/日志/设置），session = 独立会话 OS 窗体（完整 最小化/最大化/关闭 + 画面 + 键鼠）。",
+  "windows": [
+    "main",
+    "session"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging"
+  ]
+}

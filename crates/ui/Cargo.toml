@@ -1,0 +1,23 @@
+[package]
+name = "landesk-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk GUI 服务层（M8，FR-08/09/11）：状态栏视图映射 + 连接路径决策 + 配置页持久化 + 设备列表模型。纯逻辑可离线验证，Tauri 壳经调本 crate 的 Rust API 对接（不依赖 tauri 本体）。"
+
+[dependencies]
+landesk-core = { workspace = true }
+mdns = { workspace = true }
+ice = { workspace = true }
+quic-link = { workspace = true }
+lp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+# 剪贴板 SHA-256 校验（FR-07.2，`session::clip_sha256`；主仓 vendor 已含 0.10.9，离线安全）。
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

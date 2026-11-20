@@ -1,0 +1,84 @@
+# LanDesk CI（M1）
+#
+# 设计要点：
+# - 依赖锁定在仓库内 `vendor/`（directory source，见 .cargo/config.toml），
+#   CI 无需访问 crates.io，构建确定性由 Cargo.lock + vendor 共同保证；
+# - rust-toolchain.toml 固定 stable 通道；
+# - aarch64 交叉编译配置（.cargo/config.toml [target.aarch64-unknown-linux-gnu]）
+#   仅对该 target 门控，x86_64 本地/CI 构建不受影响。
+# - 后续 M3+ 在此追加：clippy、fmt 检查、aarch64 OK3568 交叉编译 job、Tauri 前端构建。
+# - M9 追加：三平台矩阵开启 clippy（对齐 architecture §6「cargo clippy + test」），
+#   并新增 aarch64 编译检查 job（cross 容器，仅 check 不跑测试，OK3568 真机 M9 阶段跑 stable-72h.sh）。
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+  pull_request:
+    branches: [main, dev]
+
+# 同分支重复推送时取消旧 run，节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build & clippy & test (${{ matrix.os }})
+    # 核心逻辑（lp/crypto/avcodec-wrap/capture）为纯平台无关实现，
+    # 三平台全量回归；平台 API（input 注入、capture 实现）按 feature 门控。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, toolchain pinned)
+        # rust-toolchain.toml 声明 stable，rustup 按文件自动安装
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: landesk-${{ matrix.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            landesk-${{ matrix.os }}-
+
+      - name: Build workspace
+        # vendor/ directory source 全本地，无需网络
+        run: cargo build --locked
+
+      - name: Clippy (M9 起开启)
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --locked
+
+  # aarch64 OK3568 交叉编译（仅 check，不跑测试；测试在真机 M9 阶段跑 stable-72h.sh）
+  aarch64-compile-check:
+    name: aarch64 compile-check (OK3568)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://cross-rs.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: aarch64 cargo check (cross container)
+        # landesk-core 为流水线核心，跨机 OK3568 以它为准做编译检查。
+        # cross 默认容器已含 aarch64 交叉工具链；libav 裁剪产物在真机/本地由 build-libav 提供，
+        # 此 job 仅验证 Rust 侧可编译（无编码 feature 骨架），不要求 thirdparty。
+        run: cross check --target aarch64-unknown-linux-gnu -p landesk-core

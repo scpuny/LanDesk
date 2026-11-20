@@ -1,0 +1,553 @@
+# LanDesk Release（v0.2.0+：五架构矩阵 + 真 Tauri 安装包 + SHA256）
+#
+# 目标架构（用户指定 5 个）：
+#   - macOS x86_64（intel）   ← macos job CLI 交叉 target
+#   - macOS arm64（arch）     ← macos job 宿主 target（+ GUI .dmg/.app 原生）
+#   - Linux amd64 (x86_64)   ← linux job 宿主构建（+ GUI .deb）
+#   - Linux arm (aarch64)    ← linux-aarch64 job 宿主交叉（gcc-aarch64-linux-gnu + ring CC）
+#   - Windows x86_64         ← windows job 宿主构建（+ GUI NSIS .exe 安装包）
+#
+# 产物分两层：
+#   1) GUI 安装包（Tauri，headline 资产，best-effort 不阻塞）：
+#      - macos arm64：`tauri build` → `LanDesk_*.dmg` + `LanDesk.app`（zip）
+#      - windows    ：`tauri build` → `LanDesk_*_setup.exe`（NSIS 安装包）
+#      - linux amd64：`tauri build` → `landesk_*.deb` + `*.rpm`
+#      未签名/未公证：首运 macOS 右键-打开、Windows SmartScreen「仍要运行」。
+#   2) 无头 CLI/服务端二进制（backbone，五架构全出）：controlled / controller /
+#      relay-server / signaling-server → zip。主仓 vendor/ 已入库 → `--locked` 全离线确定性。
+#
+# 流程健壮性（修 v0.2.0 release #3 的 FAILED）：
+#   - aarch64 交叉：设 CC_aarch64_unknown_linux_gnu 让 ring（cc C 构建）交叉成功；
+#     该 job 构建步 `continue-on-error`，失败不红整体 run（有产物则出 aarch64 zip）。
+#   - 所有 GUI/跨架构步 `continue-on-error`；upload `if: always()` + `if-no-files-found: warn`。
+#   - release 聚合 job `if: ${{ !cancelled() }}`，`files: release-assets/*`（恒含 SHA256SUMS.txt，
+#     空 zip 也不会 glob 崩溃）。单平台失败只缺资产，不整 run 红。
+#
+# 触发：
+#   - 推 `v*` tag（如 v0.2.0）→ 自动打包并发 GitHub Release；
+#   - 手动 `workflow_dispatch`：无 tag 时 ref_name=分支名，资产名用分支名兜底。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # 创建 GitHub Release + 上传资产
+
+# 同 ref 重推 tag 串行（不取消在跑的）；release 聚合容忍缺失资产
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ------------------------------------------------------------------
+  # macOS（arm64 runner）：CLI x86_64 + arm64；GUI arm64 原生 .dmg/.app（best-effort）
+  # ------------------------------------------------------------------
+  macos:
+    name: build & package (macos)
+    runs-on: macos-latest
+    steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" \
+                   | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] \
+            || { echo "vendor/ self-heal FAILED ${probe}: want=${want} got=${got}" >&2; exit 1; }
+          echo "vendor/ self-healed: ${probe} == HEAD LF blob (sha256 ${got})"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Apple targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Build CLI (x86_64 + arm64, 主仓 vendor 离线)
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          for t in x86_64-apple-darwin aarch64-apple-darwin; do
+            arch="${t%%-*}"
+            echo "== CLI ${arch}"
+            cargo build --release --locked \
+              -p controlled -p controller -p relay-server -p signaling-server \
+              --target "${t}"
+            mkdir -p "dist/macos/cli-${arch}"
+            for b in controlled controller relay-server signaling-server; do
+              cp "target/${t}/release/${b}" "dist/macos/cli-${arch}/${b}"
+            done
+            ( cd "dist/macos" && zip -qr "landesk-${ver}-macos-${arch}.zip" "cli-${arch}" )
+          done
+          ls -1 "dist/macos"/*.zip
+
+      - name: GUI installer (.dmg/.app, x86_64 + arm64, best-effort)
+        # 壳 vendor/ 未入库：摘掉壳离线配置 → 在线拉 crates.io（shell Cargo.lock 已入库保确定性）。
+        # tauri build 用 @tauri-apps/cli 预编译二进制（快，免 cargo install）。
+        # 双 arch 各出 .dmg + .app；失败不影响 CLI 资产；配置用绝对路径 trap 无条件还原。
+        continue-on-error: true
+        run: |
+          set -u
+          ver="${GITHUB_REF_NAME#v}"
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          for t in x86_64-apple-darwin aarch64-apple-darwin; do
+            arch="${t%%-*}"
+            echo "== GUI dmg/app ${arch}"
+            ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build \
+                --features tauri --target "${t}" ) \
+              || { echo "GUI build ${arch} failed, skipping"; continue; }
+            B="ui/src-tauri/target/${t}/release/bundle"
+            mkdir -p "${WS}/dist/macos/gui"
+            find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
+              cp -f "$d" "${WS}/dist/macos/gui/landesk-${ver}-gui-macos-${arch}.dmg"
+            done
+            APP=$(find "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)
+            if [[ -n "${APP:-}" ]]; then
+              APPDIR="$(cd "$(dirname "$APP")" && pwd)"
+              ( cd "${APPDIR}" && zip -qr "landesk-${ver}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
+              mv -f "${APPDIR}/landesk-${ver}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
+            fi
+          done
+          echo "GUI dmg/app: $(ls -1 "${WS}/dist/macos/gui" 2>/dev/null | tr '\n' ' ')"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  # Windows x86_64：CLI + GUI NSIS 安装包（.exe，未签名）
+  # ------------------------------------------------------------------
+  windows:
+    name: build & package (windows-x86_64)
+    runs-on: windows-latest
+    steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" \
+                   | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] \
+            || { echo "vendor/ self-heal FAILED ${probe}: want=${want} got=${got}" >&2; exit 1; }
+          echo "vendor/ self-healed: ${probe} == HEAD LF blob (sha256 ${got})"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CLI (x86_64, 主仓 vendor 离线)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          cargo build --release --locked \
+            -p controlled -p controller -p relay-server -p signaling-server
+          mkdir -p dist/windows/cli
+          for b in controlled controller relay-server signaling-server; do
+            cp "target/release/${b}.exe" "dist/windows/cli/${b}.exe"
+          done
+          ( cd dist/windows && tar -a -c -f "landesk-${ver}-windows-x86_64.zip" cli )
+          ls -1 dist/windows/*.zip
+
+      - name: GUI installer (NSIS .exe, best-effort)
+        # WebView2 运行时由用户机自带/在线下载；产物未签名。
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          ver="${GITHUB_REF_NAME#v}"
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
+            || echo "GUI build failed, skipping"
+          B="ui/src-tauri/target/release/bundle/nsis"
+          if [[ -d "$B" ]]; then
+            mkdir -p dist/windows/gui
+            find "$B" -maxdepth 1 -name '*.exe' 2>/dev/null | while read -r e; do
+              cp -f "$e" "dist/windows/gui/landesk-${ver}-gui-windows-x86_64-setup.exe"
+            done
+            echo "GUI NSIS: $(ls -1 dist/windows/gui 2>/dev/null | tr '\n' ' ')"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  # Linux x86_64：CLI + GUI .deb（宿主直编，系统依赖 apt）
+  # ------------------------------------------------------------------
+  linux:
+    name: build & package (linux-x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" \
+                   | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] \
+            || { echo "vendor/ self-heal FAILED ${probe}: want=${want} got=${got}" >&2; exit 1; }
+          echo "vendor/ self-healed: ${probe} == HEAD LF blob (sha256 ${got})"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CLI (x86_64, 主仓 vendor 离线)
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          cargo build --release --locked \
+            -p controlled -p controller -p relay-server -p signaling-server
+          mkdir -p dist/linux/cli
+          for b in controlled controller relay-server signaling-server; do
+            cp "target/release/${b}" "dist/linux/cli/${b}"
+          done
+          ( cd dist/linux && zip -qr "landesk-${ver}-linux-x86_64.zip" cli )
+          ls -1 dist/linux/*.zip
+
+      - name: GUI installer (.deb + .rpm, best-effort)
+        # Tauri v2 on ubuntu-latest：webkit2gtk-4.1 等系统库 + dpkg-deb + rpmbuild；缺则跳过。
+        continue-on-error: true
+        run: |
+          set -u
+          ver="${GITHUB_REF_NAME#v}"
+          sudo apt-get update -qq && sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libxdo-dev pkg-config file libfuse2 rpm \
+            || echo "apt install failed, GUI likely skipped"
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
+            || echo "GUI build failed, skipping"
+          mkdir -p dist/linux/gui
+          BD="ui/src-tauri/target/release/bundle/deb"
+          if [[ -d "$BD" ]]; then
+            find "$BD" -maxdepth 1 -name '*.deb' 2>/dev/null | while read -r d; do
+              cp -f "$d" "dist/linux/gui/landesk-${ver}-gui-linux-x86_64.deb"
+            done
+          fi
+          BR="ui/src-tauri/target/release/bundle/rpm"
+          if [[ -d "$BR" ]]; then
+            find "$BR" -maxdepth 1 -name '*.rpm' 2>/dev/null | while read -r r; do
+              cp -f "$r" "dist/linux/gui/landesk-${ver}-gui-linux-x86_64.rpm"
+            done
+          fi
+          echo "GUI deb/rpm: $(ls -1 dist/linux/gui 2>/dev/null | tr '\n' ' ')"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  # Linux aarch64 (arm)：宿主 gcc-aarch64-linux-gnu 交叉（ring 需 CC_<target>）
+  # 仅 CLI（GUI 跨 target 系统库暂不覆盖）。构建步 best-effort，失败不红整体 run。
+  # ------------------------------------------------------------------
+  linux-aarch64:
+    name: build & package (linux-aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" \
+                   | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] \
+            || { echo "vendor/ self-heal FAILED ${probe}: want=${want} got=${got}" >&2; exit 1; }
+          echo "vendor/ self-healed: ${probe} == HEAD LF blob (sha256 ${got})"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install aarch64 cross toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Build CLI (aarch64, ring CC 交叉, best-effort)
+        # 主仓 .cargo/config.toml 已设 linker=aarch64-linux-gnu-gcc；再补 CC_<target>
+        # 让 ring（cc C 构建）能用目标 C 编译器，避免交叉 build.rs 探针失败。
+        continue-on-error: true
+        run: |
+          set -u
+          ver="${GITHUB_REF_NAME#v}"
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          echo "== cross CLI aarch64"
+          cargo build --release --locked \
+            -p controlled -p controller -p relay-server -p signaling-server \
+            --target aarch64-unknown-linux-gnu \
+            && {
+              mkdir -p dist/linux-aarch64/cli
+              for b in controlled controller relay-server signaling-server; do
+                cp "target/aarch64-unknown-linux-gnu/release/${b}" "dist/linux-aarch64/cli/${b}"
+              done
+              file dist/linux-aarch64/cli/controlled || true
+              ( cd dist/linux-aarch64 && zip -qr "landesk-${ver}-linux-aarch64.zip" cli )
+              echo "aarch64 CLI ready"
+            } \
+            || echo "aarch64 cross build failed (ring/CC?), skipping aarch64 assets"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-aarch64
+          path: dist/
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  # 聚合：SHA256 + 版本说明 + 发 GitHub Release（恒含 SHA256SUMS.txt，glob 不空）
+  # ------------------------------------------------------------------
+  release:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [macos, windows, linux, linux-aarch64]
+    # 单平台 job 失败/缺资产不阻塞发布（notes 标注）；仅全取消才不发
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: 聚合资产（安装包 + CLI zip）+ SHA256
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          mkdir -p release-assets
+          # 收集所有产物：CLI zip + 各平台安装包（dmg / deb / exe / app zip）
+          # download-artifact 展平到 dist/<artifact-name>/...；递归取全部目标扩展
+          # ★ 多个 -name 之间必须显式 -o：默认 AND 会让一个文件无法同时匹配所有扩展 → 永远空
+          find dist -type f \( -name 'landesk-*.zip' \
+                                 -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \
+                                 -o -name '*-setup.exe' -o -name '*-app.zip' \) \
+               -exec cp -f {} release-assets/ \; 2>/dev/null || true
+          # 归一化命名兜底：若某 GUI 步没来得及归一（原始 tauri 名），补成 landesk-* 前缀。
+          # （各 GUI 步已 cp 成 landesk-* 名，此处多数是 no-op；*.dmg 不区分 arch 兜底命名）
+          ( cd release-assets && for f in *; do
+              [[ "${f}" == landesk-* || -f SHA256SUMS.txt ]] && continue
+              case "$f" in
+                *.dmg)  mv -f "$f" "landesk-${ver}-gui-macos.dmg" ;;
+                *.deb)  mv -f "$f" "landesk-${ver}-gui-linux-x86_64.deb" ;;
+                *.rpm)  mv -f "$f" "landesk-${ver}-gui-linux-x86_64.rpm" ;;
+                *.exe)  mv -f "$f" "landesk-${ver}-gui-windows-x86_64-setup.exe" ;;
+              esac
+            done )
+          # SHA256：非空才算（避免 `sha256sum` 无参时读 stdin 挂死）；find -exec + 空格安全
+          has_assets=$(cd release-assets && ls -1 2>/dev/null | grep -v '^SHA256SUMS.txt$' | head -1 || true)
+          if [[ -n "${has_assets:-}" ]]; then
+            ( cd release-assets && find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' \
+                -exec sha256sum {} + > SHA256SUMS.txt )
+          else
+            echo "sha256sum: no assets (all build jobs failed?)" > release-assets/SHA256SUMS.txt
+          fi
+
+          # 实际产出的资产清单（写进 notes，缺哪个一目了然）
+          {
+            echo "LanDesk v${ver}（tag ${GITHUB_REF_NAME}）"
+            echo ""
+            echo "## 本次产出资产"
+            echo '```'
+            ls -1 release-assets/ | grep -v '^SHA256SUMS.txt$' || echo "（无——各构建 job 需查日志）"
+            echo '```'
+            echo ""
+            echo "## GUI 安装包（headline）"
+            echo "- macOS：\`landesk-${ver}-gui-macos-{x86_64,arm64}.dmg\`（+ 对应 .app zip）—未公证，首运右键-打开"
+            echo "- Windows x64：\`landesk-${ver}-gui-windows-x86_64-setup.exe\`（NSIS，未签名）"
+            echo "- Linux amd64：\`landesk-${ver}-gui-linux-x86_64.deb\` + \`landesk-${ver}-gui-linux-x86_64.rpm\`（依赖 libwebkit2gtk-4.1 / gtk3）"
+            echo "- 缺某平台：该 GUI 步 best-effort 失败，见对应 job 日志；CLI zip 仍可用。"
+            echo ""
+            echo "## 无头 CLI / 服务端（五架构 backbone）"
+            echo "- \`landesk-${ver}-macos-{x86_64,arm64}.zip\` / \`landesk-${ver}-windows-x86_64.zip\`"
+            echo "  / \`landesk-${ver}-linux-x86_64.zip\` / \`landesk-${ver}-linux-aarch64.zip\`（交叉 best-effort）"
+            echo "- 每 zip 含 controlled / controller / relay-server / signaling-server"
+            echo "- 为**无编码 feature 骨架**：完整 H.264/硬编产物需本地备 thirdparty/ 后跑"
+            echo "  \`scripts/release/build-all.sh\`。"
+            echo ""
+            echo "## 校验"
+            echo "- \`SHA256SUMS.txt\`"
+            echo "- 稳定性验证：\`scripts/release/stable-72h.sh\`。"
+          } > release-notes.md
+          echo "---- 资产清单 ----"
+          ls -1 release-assets/
+
+      - name: 创建/更新 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "LanDesk ${{ github.ref_name }}"
+          files: |
+            release-assets/*
+          body_path: release-notes.md
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: false

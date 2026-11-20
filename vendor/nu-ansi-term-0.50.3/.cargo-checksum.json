@@ -1,0 +1,33 @@
+{
+  "files": {
+    ".cargo_vcs_info.json": "c1ecf234071f1084ae0f7664005c62d15597fc43b49173c8832d5a2514d373a6",
+    ".github/workflows/ci.yml": "73181381783fefa613a6f803db94414a7cefe0f59f12460914b59e291826e4b2",
+    ".gitignore": "4b604154710e9542aae3911afdc14a2fda5ad39947cd12704111cb54852f4173",
+    "CHANGELOG.md": "0f00a68e8d512e7be6ef518851c15c656257f753dd5b6eb1e3df97b84f048575",
+    "Cargo.lock": "0882bc7c28e5fc9163052ad8a6e26665b533f44c4f40d897f415bc193d12ee0f",
+    "Cargo.toml": "0ef2805c051ffdb2842c99422d583a5724653d78b42ed927dfb02095923168ee",
+    "Cargo.toml.orig": "faed84997546d63bf6fbdb09b07adf20d15d0debd712304c3d08ab4c18a7ed79",
+    "LICENSE": "cfdb7491dfa8800a1d561957d6a072ad63a6305ffa48386d04eae8eac8d65e8a",
+    "README.md": "ad86cf69c480e817e93e82c78899f8ba1b97ad2b171a50adf4f6ba6e0ef608ce",
+    "examples/256_colors.rs": "1495c002485f18c46998418c771a86ebc45f5c1934c5d0b1fdc904bf737ef8db",
+    "examples/basic_colors.rs": "497d0e2ec7953ef4fedb0dc29d9cd802b8247fa74793b81e1d8c6b51e24cbd10",
+    "examples/gradient_colors.rs": "648e9a0b30770ef7d115830f8863a51241bbb0fba855f52f7d5ddab5a15ac7b5",
+    "examples/hyperlink.rs": "6d0c8f7cb222ed5b3fef51948e381a75aee163398f55bf6f914cd3619cf40e10",
+    "examples/may_sleep/mod.rs": "ab9fe52e936077725a64857d2a8fbc98fa8b0885bdb4dff02b8546e99701fe5a",
+    "examples/rgb_colors.rs": "34ed730d4c655edffc7741d7ad733488fcbc0750a0eedff1c84b8a0f8b3b4faa",
+    "examples/title.rs": "2626a3bf8995b699bcaa9f56e73b720bbd37d71a81d216b934a1f5ac6a9ccfac",
+    "src/ansi.rs": "98fcaaf666da8288c403691846bb09bb95a0c008842ab10384cfe4005cf79281",
+    "src/debug.rs": "966e82b1f41a5266f0a193c16fff5d476885b065b2356ec43418d57b7eb9c17e",
+    "src/difference.rs": "20218691e94027a34b4905cfc7d39b093d94c453a5f62a37ebec62785969c1fe",
+    "src/display.rs": "095a0beaa892e65066229108587fe49b2a50f9ea03f81c0964eedefab77d16fe",
+    "src/gradient.rs": "0f44652ada7d0a920a26522b1c7f704bd4071d72ab01d2ca37a51181a686ca53",
+    "src/lib.rs": "3fd5b6ca1c7b9a19f2cfc9025f3b87f2eadafe2ad9e447b3b46313ae80b92e05",
+    "src/rgb.rs": "fd2ac3c96c62e8e5920c4ae292b5e61936bfc67e308ece92218219cdd37e2565",
+    "src/style.rs": "a385b12ebada3cb7eed68e9e0ed99c927724d57949db42c348a0a4e2c36c4a7a",
+    "src/util.rs": "036abcc018a191bbcaa70d704490f04db562b047a85b8b30f6045d54e67c764f",
+    "src/windows.rs": "55695de0b4d67a1b001157c287f3175edbf7b97621679d8c665a51b0c3a2d140",
+    "src/write.rs": "eb4c0d5dbc7cc68d5aa8f19dbb822213c92b896fc7ad37fecb5f95c94fe9e5b3",
+    "tests/style.rs": "68c85634422628903fc90c35547d6f7838540294f6fa25c8e2f5237147a744a8"
+  },
+  "package": "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+}

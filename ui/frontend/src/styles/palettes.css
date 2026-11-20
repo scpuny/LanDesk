@@ -1,0 +1,439 @@
+/* =====================================================================
+ * LanDesk 视觉风格（Visual Styles / Base Styles）
+ * ---------------------------------------------------------------------
+ * 6 套视觉风格的中性色板（canvas/bg/surface/border/divider…）由各自
+ * 品牌色相 H 通过 HSL 派生（低饱和度 6~22%），确保「背景色 / 边框色 /
+ * 表面色」随主题色相走，而不是各主题共用一套固定灰。
+ *   - prototype 不写覆盖，沿用 tokens.css 的 Calicat V2 蓝色基准。
+ *   - success/warning/danger/info 语义色沿用 tokens.css 基准，主题不可覆盖。
+ *   - on-primary（text-inverse）/ on-soft / accent 随主题独立配置。
+ * 明暗模式（data-theme）与视觉风格（data-palette）互相独立。
+ * 加载顺序：tokens.css → palettes.css → base.css → ui.css。
+ * ===================================================================== */
+
+/* ---- Graphite 石墨  accent #FF7B45  H=17° ---- */
+:root[data-palette="graphite"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 17° 派生 */
+  --ll-color-canvas: #F1E8E4;
+  --ll-color-bg: #F9F7F5;
+  --ll-color-bg-elevated: #F6F1EF;
+  --ll-color-surface: #FBF9F9;
+  --ll-color-surface-2: #F4EEEB;
+  --ll-color-surface-3: #EDE2DE;
+  --ll-color-surface-hover: #F0E8E5;
+  --ll-color-row-hover: #EBDFDB;
+  --ll-color-surface-active: #FFEDE5;
+  --ll-color-titlebar: #F7F4F2;
+  --ll-color-border: #E6D3CC;
+  --ll-color-border-strong: #C19E90;
+  --ll-color-divider: #EEE6E2;
+  /* 品牌 */
+  --ll-color-text-inverse: #571D05;
+  --ll-color-brand: #FF7B45;
+  --ll-color-brand-hover: #E06C3D;
+  --ll-color-brand-active: #C76036;
+  --ll-color-brand-light: #FFEDE5;
+  --ll-color-brand-bg: rgba(245, 114, 61, 0.12);
+  --ll-color-accent: #FF7B45;
+  --ll-color-on-soft: #571D05;
+  --ll-color-info-surface: #F7EDE9;
+  --ll-color-info-border: #F0CFC2;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #F5F1EF;
+  --ll-serial-text: #281E1B;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="graphite"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 17° 派生 */
+  --ll-color-canvas: #16100D;
+  --ll-color-bg: #221916;
+  --ll-color-bg-elevated: #1C1511;
+  --ll-color-surface: #2E231F;
+  --ll-color-surface-2: #281E1A;
+  --ll-color-surface-3: #40312B;
+  --ll-color-surface-hover: #3B2C26;
+  --ll-color-row-hover: #46362F;
+  --ll-color-surface-active: #3E2822;
+  --ll-color-titlebar: #1C1511;
+  --ll-color-border: #392D28;
+  --ll-color-border-strong: #69564F;
+  --ll-color-divider: #281E1A;
+  /* 品牌 */
+  --ll-color-text-inverse: #571D05;
+  --ll-color-brand: #FF7B45;
+  --ll-color-brand-hover: #FF9063;
+  --ll-color-brand-active: #FF8B5B;
+  --ll-color-brand-light: #3E2822;
+  --ll-color-brand-bg: rgba(246, 132, 85, 0.2);
+  --ll-color-accent: #FF7B45;
+  --ll-color-on-soft: #FF7B45;
+  --ll-color-info-surface: #312521;
+  --ll-color-info-border: #392D28;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #1F1714;
+  --ll-serial-text: #E4DFDD;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+/* ---- Aurora 柔雾极光  accent #9E7BFF  H=256° ---- */
+:root[data-palette="aurora"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 256° 派生 */
+  --ll-color-canvas: #E8E4F1;
+  --ll-color-bg: #F6F5F9;
+  --ll-color-bg-elevated: #F1EFF6;
+  --ll-color-surface: #F9F9FB;
+  --ll-color-surface-2: #EEEBF4;
+  --ll-color-surface-3: #E2DEED;
+  --ll-color-surface-hover: #E8E5F0;
+  --ll-color-row-hover: #DFDBEB;
+  --ll-color-surface-active: #E3E1F9;
+  --ll-color-titlebar: #F4F2F7;
+  --ll-color-border: #D3CCE6;
+  --ll-color-border-strong: #9D90C1;
+  --ll-color-divider: #E5E2EE;
+  /* 品牌 */
+  --ll-color-text-inverse: #22066F;
+  --ll-color-brand: #9E7BFF;
+  --ll-color-brand-hover: #8A99F7;
+  --ll-color-brand-active: #7B60C7;
+  --ll-color-brand-light: #E3E1F9;
+  --ll-color-brand-bg: rgba(110, 61, 245, 0.12);
+  --ll-color-accent: #9E7BFF;
+  --ll-color-on-soft: #22066F;
+  --ll-color-info-surface: #ECE9F7;
+  --ll-color-info-border: #CEC2F0;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #F1EFF5;
+  --ll-serial-text: #1E1B28;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="aurora"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 256° 派生 */
+  --ll-color-canvas: #100D16;
+  --ll-color-bg: #191622;
+  --ll-color-bg-elevated: #14111C;
+  --ll-color-surface: #231F2E;
+  --ll-color-surface-2: #1E1A28;
+  --ll-color-surface-3: #312B40;
+  --ll-color-surface-hover: #2B263B;
+  --ll-color-row-hover: #352F46;
+  --ll-color-surface-active: #292742;
+  --ll-color-titlebar: #14111C;
+  --ll-color-border: #2C2839;
+  --ll-color-border-strong: #564F69;
+  --ll-color-divider: #1E1A28;
+  /* 品牌 */
+  --ll-color-text-inverse: #22066F;
+  --ll-color-brand: #9E7BFF;
+  --ll-color-brand-hover: #8A99F7;
+  --ll-color-brand-active: #AA8BFF;
+  --ll-color-brand-light: #292742;
+  --ll-color-brand-bg: rgba(128, 85, 246, 0.2);
+  --ll-color-accent: #9E7BFF;
+  --ll-color-on-soft: #9E7BFF;
+  --ll-color-info-surface: #252131;
+  --ll-color-info-border: #2C2839;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #17141F;
+  --ll-serial-text: #DFDDE4;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+/* ---- Slate 精炼  accent #478AF6  H=217° ---- */
+:root[data-palette="slate"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 217° 派生 */
+  --ll-color-canvas: #E4E9F1;
+  --ll-color-bg: #F5F7F9;
+  --ll-color-bg-elevated: #EFF1F6;
+  --ll-color-surface: #F9FAFB;
+  --ll-color-surface-2: #EBEFF4;
+  --ll-color-surface-3: #DEE4ED;
+  --ll-color-surface-hover: #E5E9F0;
+  --ll-color-row-hover: #DBE1EB;
+  --ll-color-surface-active: #DBE7FB;
+  --ll-color-titlebar: #F2F4F7;
+  --ll-color-border: #CCD6E6;
+  --ll-color-border-strong: #90A3C1;
+  --ll-color-divider: #E2E7EE;
+  /* 品牌 */
+  --ll-color-text-inverse: #031A3F;
+  --ll-color-brand: #478AF6;
+  --ll-color-brand-hover: #3E79D8;
+  --ll-color-brand-active: #376CC0;
+  --ll-color-brand-light: #DBE7FB;
+  --ll-color-brand-bg: rgba(61, 132, 245, 0.12);
+  --ll-color-accent: #478AF6;
+  --ll-color-on-soft: #031A3F;
+  --ll-color-info-surface: #E9EEF7;
+  --ll-color-info-border: #C2D3F0;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #EFF2F5;
+  --ll-serial-text: #1B2028;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="slate"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 217° 派生 */
+  --ll-color-canvas: #0D1116;
+  --ll-color-bg: #161B22;
+  --ll-color-bg-elevated: #11161C;
+  --ll-color-surface: #1F242E;
+  --ll-color-surface-2: #1A1F28;
+  --ll-color-surface-3: #2B3340;
+  --ll-color-surface-hover: #262E3B;
+  --ll-color-row-hover: #2F3846;
+  --ll-color-surface-active: #223147;
+  --ll-color-titlebar: #11161C;
+  --ll-color-border: #282E39;
+  --ll-color-border-strong: #4F5969;
+  --ll-color-divider: #1A1F28;
+  /* 品牌 */
+  --ll-color-text-inverse: #031A3F;
+  --ll-color-brand: #478AF6;
+  --ll-color-brand-hover: #649DF7;
+  --ll-color-brand-active: #5D98F7;
+  --ll-color-brand-light: #223147;
+  --ll-color-brand-bg: rgba(85, 147, 246, 0.2);
+  --ll-color-accent: #478AF6;
+  --ll-color-on-soft: #478AF6;
+  --ll-color-info-surface: #212731;
+  --ll-color-info-border: #282E39;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #14181F;
+  --ll-serial-text: #DDE0E4;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+/* ---- Carbon 深邃  accent #28D4D1  H=179° ---- */
+:root[data-palette="carbon"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 179° 派生 */
+  --ll-color-canvas: #E4F1F1;
+  --ll-color-bg: #F5F9F9;
+  --ll-color-bg-elevated: #EFF6F5;
+  --ll-color-surface: #F9FBFB;
+  --ll-color-surface-2: #EBF4F4;
+  --ll-color-surface-3: #DEEDED;
+  --ll-color-surface-hover: #E5F0F0;
+  --ll-color-row-hover: #DBEBEB;
+  --ll-color-surface-active: #D1F0EE;
+  --ll-color-titlebar: #F2F7F7;
+  --ll-color-border: #CCE6E5;
+  --ll-color-border-strong: #90C1C0;
+  --ll-color-divider: #E2EEEE;
+  /* 品牌 */
+  --ll-color-text-inverse: #0F4D4C;
+  --ll-color-brand: #28D4D1;
+  --ll-color-brand-hover: #23BBB8;
+  --ll-color-brand-active: #1FA5A3;
+  --ll-color-brand-light: #D1F0EE;
+  --ll-color-brand-bg: rgba(61, 245, 242, 0.12);
+  --ll-color-accent: #28D4D1;
+  --ll-color-on-soft: #0F4D4C;
+  --ll-color-info-surface: #E9F7F7;
+  --ll-color-info-border: #C2F0EF;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #EFF5F5;
+  --ll-serial-text: #1B2828;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="carbon"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 179° 派生 */
+  --ll-color-canvas: #0D1616;
+  --ll-color-bg: #162222;
+  --ll-color-bg-elevated: #111C1C;
+  --ll-color-surface: #1F2E2E;
+  --ll-color-surface-2: #1A2828;
+  --ll-color-surface-3: #2B4040;
+  --ll-color-surface-hover: #263B3B;
+  --ll-color-row-hover: #2F4646;
+  --ll-color-surface-active: #123233;
+  --ll-color-titlebar: #111C1C;
+  --ll-color-border: #283939;
+  --ll-color-border-strong: #4F6968;
+  --ll-color-divider: #1A2828;
+  /* 品牌 */
+  --ll-color-text-inverse: #0F4D4C;
+  --ll-color-brand: #28D4D1;
+  --ll-color-brand-hover: #4ADBD8;
+  --ll-color-brand-active: #42D9D7;
+  --ll-color-brand-light: #123233;
+  --ll-color-brand-bg: rgba(85, 246, 243, 0.2);
+  --ll-color-accent: #28D4D1;
+  --ll-color-on-soft: #28D4D1;
+  --ll-color-info-surface: #213131;
+  --ll-color-info-border: #283939;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #141F1F;
+  --ll-serial-text: #DDE4E4;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+/* ---- Nocturne 柔和  accent #8A8BF9  H=240° ---- */
+:root[data-palette="nocturne"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 240° 派生 */
+  --ll-color-canvas: #E4E5F1;
+  --ll-color-bg: #F5F5F9;
+  --ll-color-bg-elevated: #EFEFF6;
+  --ll-color-surface: #F9F9FB;
+  --ll-color-surface-2: #EBEBF4;
+  --ll-color-surface-3: #DEDEED;
+  --ll-color-surface-hover: #E5E5F0;
+  --ll-color-row-hover: #DBDBEB;
+  --ll-color-surface-active: #E0DFFB;
+  --ll-color-titlebar: #F2F2F7;
+  --ll-color-border: #CCCCE6;
+  --ll-color-border-strong: #9090C1;
+  --ll-color-divider: #E2E2EE;
+  /* 品牌 */
+  --ll-color-text-inverse: #07087E;
+  --ll-color-brand: #8A8BF9;
+  --ll-color-brand-hover: #797ADB;
+  --ll-color-brand-active: #6C6CC2;
+  --ll-color-brand-light: #E0DFFB;
+  --ll-color-brand-bg: rgba(61, 63, 245, 0.12);
+  --ll-color-accent: #8A8BF9;
+  --ll-color-on-soft: #07087E;
+  --ll-color-info-surface: #E9E9F7;
+  --ll-color-info-border: #C2C2F0;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #EFEFF5;
+  --ll-serial-text: #1B1B28;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="nocturne"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 240° 派生 */
+  --ll-color-canvas: #0D0D16;
+  --ll-color-bg: #161622;
+  --ll-color-bg-elevated: #11121C;
+  --ll-color-surface: #1F1F2E;
+  --ll-color-surface-2: #1A1A28;
+  --ll-color-surface-3: #2B2B40;
+  --ll-color-surface-hover: #26263B;
+  --ll-color-row-hover: #2F2F46;
+  --ll-color-surface-active: #252647;
+  --ll-color-titlebar: #11121C;
+  --ll-color-border: #282839;
+  --ll-color-border-strong: #4F4F69;
+  --ll-color-divider: #1A1A28;
+  /* 品牌 */
+  --ll-color-text-inverse: #07087E;
+  --ll-color-brand: #8A8BF9;
+  --ll-color-brand-hover: #9D9EFA;
+  --ll-color-brand-active: #9899FA;
+  --ll-color-brand-light: #252647;
+  --ll-color-brand-bg: rgba(85, 87, 246, 0.2);
+  --ll-color-accent: #8A8BF9;
+  --ll-color-on-soft: #8A8BF9;
+  --ll-color-info-surface: #212131;
+  --ll-color-info-border: #282839;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #14141F;
+  --ll-serial-text: #DDDDE4;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+/* ---- Amber 琥珀  accent #D76B38  H=19° ---- */
+:root[data-palette="amber"] {
+  color-scheme: light;
+  /* 中性色：由品牌色相 19° 派生 */
+  --ll-color-canvas: #F1E8E4;
+  --ll-color-bg: #F9F7F5;
+  --ll-color-bg-elevated: #F6F1EF;
+  --ll-color-surface: #FBF9F9;
+  --ll-color-surface-2: #F4EEEB;
+  --ll-color-surface-3: #EDE3DE;
+  --ll-color-surface-hover: #F0E9E5;
+  --ll-color-row-hover: #EBE0DB;
+  --ll-color-surface-active: #F4DDCF;
+  --ll-color-titlebar: #F7F4F2;
+  --ll-color-border: #E6D4CC;
+  --ll-color-border-strong: #C1A090;
+  --ll-color-divider: #EEE6E2;
+  /* 品牌 */
+  --ll-color-text-inverse: #2A1309;
+  --ll-color-brand: #D76B38;
+  --ll-color-brand-hover: #BD5E31;
+  --ll-color-brand-active: #A8532C;
+  --ll-color-brand-light: #F4DDCF;
+  --ll-color-brand-bg: rgba(245, 120, 61, 0.12);
+  --ll-color-accent: #D76B38;
+  --ll-color-on-soft: #2A1309;
+  --ll-color-info-surface: #F7EDE9;
+  --ll-color-info-border: #F0D0C2;
+  --ll-color-overlay: rgba(18, 22, 28, 0.30);
+  --ll-color-scrim: rgba(0, 0, 0, 0.04);
+  --ll-serial-bg: #F5F1EF;
+  --ll-serial-text: #281F1B;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+
+:root[data-palette="amber"][data-theme="dark"] {
+  color-scheme: dark;
+  /* 中性色：由品牌色相 19° 派生 */
+  --ll-color-canvas: #16100D;
+  --ll-color-bg: #221A16;
+  --ll-color-bg-elevated: #1C1511;
+  --ll-color-surface: #2E231F;
+  --ll-color-surface-2: #281F1A;
+  --ll-color-surface-3: #40322B;
+  --ll-color-surface-hover: #3B2D26;
+  --ll-color-row-hover: #46362F;
+  --ll-color-surface-active: #3E261A;
+  --ll-color-titlebar: #1C1511;
+  --ll-color-border: #392D28;
+  --ll-color-border-strong: #69574F;
+  --ll-color-divider: #281F1A;
+  /* 品牌 */
+  --ll-color-text-inverse: #2A1309;
+  --ll-color-brand: #D76B38;
+  --ll-color-brand-hover: #DD8358;
+  --ll-color-brand-active: #DC7D50;
+  --ll-color-brand-light: #3E261A;
+  --ll-color-brand-bg: rgba(246, 137, 85, 0.2);
+  --ll-color-accent: #D76B38;
+  --ll-color-on-soft: #D76B38;
+  --ll-color-info-surface: #312621;
+  --ll-color-info-border: #392D28;
+  --ll-color-overlay: rgba(0, 0, 0, 0.62);
+  --ll-color-scrim: rgba(255, 255, 255, 0.03);
+  --ll-serial-bg: #1F1714;
+  --ll-serial-text: #E4DFDD;
+  --ll-color-nav-text: var(--ll-color-text);
+  --ll-fw-nav: var(--ll-fw-medium);
+}
+

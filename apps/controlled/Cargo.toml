@@ -1,0 +1,30 @@
+[package]
+name = "controlled"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LanDesk 受控端（独立单文件二进制，形态A）。M1 占位。"
+
+[dependencies]
+landesk-core = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+# 视频数据面发流（P2②）：采集（合成源，离线可验证）→ 占位编码（Openh264 槽）→ NALU 分片 → QUIC Datagram。
+# 三者均已在主仓 vendor，不引新 crate；真实采集/硬编后端按 feature（`openh264` 等）后续接入。
+capture = { workspace = true }
+avcodec-wrap = { workspace = true }
+lp = { workspace = true }
+
+[dev-dependencies]
+# 视频发流泵回环测试（127.0.0.1 真 QUIC）：`mdns::OnlineDevice` 构造拨号目标 +
+# `quic_link::QuicClient::insecure_default` 信任自签证书建控制端会话。均主仓 vendor 已有，仅测试用。
+mdns = { workspace = true }
+quic-link = { workspace = true }
+landesk-core = { workspace = true }
+
+[lib]
+name = "controlled"
+path = "src/lib.rs"

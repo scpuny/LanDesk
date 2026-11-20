@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LanDesk · 远程会话</title>
+    <script>
+      // 防主题闪烁：与 index.html 同源（key 与 useTheme.js 一致）。会话 OS 窗独立装载，须各自落 data-theme。
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('ld-theme') || 'system'
+          var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          document.documentElement.setAttribute('data-theme', pref === 'system' ? sys : pref)
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/session.ts"></script>
+  </body>
+</html>
