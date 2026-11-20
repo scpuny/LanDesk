@@ -17,6 +17,10 @@ use crate::insecure;
 use crate::tls::SelfSigned;
 
 /// QUIC 客户端。
+///
+/// 可 [`Clone`]：底层 [`quinn::Endpoint`] 共享同一 UDP 驱动，克隆句柄拨号同一端点，
+/// 宿主（会话管理器）每连克隆一个、同时保留基础句柄让驱动存活。
+#[derive(Debug, Clone)]
 pub struct QuicClient {
     endpoint: Endpoint,
 }
@@ -65,6 +69,19 @@ impl QuicClient {
         endpoint.set_default_client_config(client_config);
 
         Ok(Self { endpoint })
+    }
+
+    /// 创建「信任任意证书」客户端，**自动装 quinn 内置 ring provider**（宿主便捷入口）。
+    ///
+    /// 等价 [`Self::insecure`] 但内部用 `quinn::rustls::crypto::ring::default_provider()`
+    /// （需 quinn 编译进 ring 后端，本仓默认即如此）——宿主（`landesk-ui` 命令面 /
+    /// `apps/ui-server`）**不必直接依赖 `quinn`/`ring`**，经 `landesk-ui` re-export 调本方法即可。
+    /// 一次性 `install_default()`（幂等，已装则忽略重复安装）。
+    pub fn insecure_default(bind: SocketAddr) -> Result<Self, QuicLinkError> {
+        use quinn::rustls::crypto::ring::default_provider;
+        let provider = default_provider();
+        let _ = provider.clone().install_default();
+        Self::insecure(bind, &provider)
     }
 
     /// 连接 `server_addr`，`server_name` 为 TLS SNI（环路测试传 `"localhost"`）。

@@ -2,6 +2,7 @@
 // 双轨降级：Tauri 宿主走 invoke；浏览器走 REST /api/*。
 // 出参为 landesk-ui 的可序列化模型（JSON 直进组件）。
 import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo } from '../types/index'
+import type { ControlAction, SessionResp } from '../types/index'
 
 /** ICE 打洞三态（对齐 `ice::HoleResult`，serde 默认按变体名序列化）。 */
 export type HoleResult = 'Direct' | 'NeedRelay' | 'NoPath'
@@ -169,6 +170,45 @@ export const landesk = {
     return isTauri()
       ? tauriInvoke<void>('log_clear')
       : rest<void>('/api/logs/clear', { method: 'POST' })
+  },
+
+  // ---------- 会话命令面（P2 遗留 ①，矩阵 §7.5「会话建立/鉴权/断开 + 画面/键鼠/剪贴板/截图/显示器」）----------
+  // 出参统一 `SessionResp`（双宿主同形 P1.3）：成功带 `status`/`sent`，失败带 `error`（前端读 `error` 区分）。
+  //  - Tauri：`session_connect`/`session_send_control`/`session_status`/`session_close` 命令（异步+State 返回 Result，invoke 拆出 `SessionResp`）。
+  //  - REST：`/api/session/connect`/`control`/`status`/`close`（ui-server 共享 `SessionManager`，恒 200，读 `error`）。
+
+  /** 会话建立（FR-01 一键连接 + 鉴权）：`deviceId` 经后端 `DeviceTable` 解析 `ip:port`，
+   *  QUIC 拨号 + bootstrap 隧道 + ECDH 会话升级。`sni` 缺省 `"localhost"`（环回）。 */
+  sessionConnect(deviceId: string, password: string, sni?: string): Promise<SessionResp> {
+    return isTauri()
+      ? tauriInvoke<SessionResp>('session_connect', { deviceId, password, sni: sni ?? null })
+      : rest<SessionResp>('/api/session/connect', {
+          method: 'POST',
+          body: { deviceId, password, sni: sni ?? null },
+        })
+  },
+
+  /** 发送控制帧（FR-06 键鼠 / FR-07 剪贴板 / FR-04.5 编码 / FR-03.3 显示器）：
+   *  一条 `ControlAction` 意图展开成 1..N 线层帧逐帧发出（剪贴板含 32KB 分段 + SHA-256）。
+   *  出参 `sent` = 本次发出帧数；未建会话 / 剪贴板超限带 `error`。 */
+  sessionSendControl(action: ControlAction): Promise<SessionResp> {
+    return isTauri()
+      ? tauriInvoke<SessionResp>('session_send_control', { action })
+      : rest<SessionResp>('/api/session/control', { method: 'POST', body: { action } })
+  },
+
+  /** 会话状态（FR-09.3）：出当前状态机 + 折叠快照（未连 = `idle`、无目标、度量为 `null`）。 */
+  sessionStatus(): Promise<SessionResp> {
+    return isTauri()
+      ? tauriInvoke<SessionResp>('session_status')
+      : rest<SessionResp>('/api/session/status')
+  },
+
+  /** 会话关闭（FR-02.4）：优雅断开 QUIC + 状态机落 `Closed`。 */
+  sessionClose(): Promise<SessionResp> {
+    return isTauri()
+      ? tauriInvoke<SessionResp>('session_close')
+      : rest<SessionResp>('/api/session/close', { method: 'POST' })
   },
 }
 
