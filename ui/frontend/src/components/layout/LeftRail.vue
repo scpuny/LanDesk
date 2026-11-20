@@ -10,7 +10,6 @@ const { devices, local } = useLanDesk()
 const navs: { id: MainView; label: string; icon: string }[] = [
   { id: 'remote', label: '远程控制', icon: 'zap' },
   { id: 'devices', label: '我的设备', icon: 'monitor' },
-  { id: 'session', label: '远程会话', icon: 'video' },
   { id: 'logs', label: '日志中心', icon: 'terminal' },
   { id: 'settings', label: '设置', icon: 'settings' },
 ]
