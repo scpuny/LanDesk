@@ -175,9 +175,12 @@ impl EncoderKind {
 /// 往返 + REST/Tauri 出参才不被 `"Smooth"` 字符串坑到（见 docs/ui-backend-matrix.md §6.3）。
 /// 仅走 JSON（配置持久化 / UI 出参）；二进制 `lp` 线层从不直接编码 `EncodePreset`
 /// （`EncodeParams.preset` 是裸 `u8`），故此 serde 表示不影响 wire。
+///
+/// **反序列化向后兼容**：同时接受整数码（`0/1/2`）与旧版字符串变体名
+/// （`"Smooth"/"Balanced"/"Hd"`，P0 改整数码之前生成的 `~/.config/landesk/config.json`）。
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "u8", into = "u8")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(into = "u8")]
 pub enum EncodePreset {
     Smooth = 0,
     Balanced = 1,
@@ -200,6 +203,33 @@ impl TryFrom<u8> for EncodePreset {
             2 => EncodePreset::Hd,
             _ => return Err(v),
         })
+    }
+}
+
+/// 手写 [`Deserialize`]：同时接受**整数码**（`0/1/2`，新格式）与**旧版字符串变体名**
+/// （`"Smooth"/"Balanced"/"Hd"`，P0 改整数码之前落盘的 `~/.config/landesk/config.json`）。
+/// 序列化仍出整数（见 `#[serde(into = "u8")]`），故新写盘永远是整数，旧文件也能读回。
+impl<'de> serde::Deserialize<'de> for EncodePreset {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Int(u8),
+            Str(String),
+        }
+        match Raw::deserialize(d).map_err(|e| D::Error::custom(format!("invalid encode preset: {e}")))? {
+            Raw::Int(v) => EncodePreset::try_from(v)
+                .map_err(|_| D::Error::custom(format!("invalid encode preset discriminant {v}"))),
+            Raw::Str(s) => match s.as_str() {
+                "Smooth" => Ok(EncodePreset::Smooth),
+                "Balanced" => Ok(EncodePreset::Balanced),
+                "Hd" | "HD" => Ok(EncodePreset::Hd),
+                _ => Err(D::Error::custom(format!(
+                    "invalid encode preset {s:?} (expected 0/1/2 or \"Smooth\"/\"Balanced\"/\"Hd\")"
+                ))),
+            },
+        }
     }
 }
 
@@ -315,5 +345,56 @@ impl ControlMsg {
             ControlMsg::Reconnect(_) => MsgType::Reconnect,
             ControlMsg::Heartbeat(_) => MsgType::Heartbeat,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EncodePreset;
+    use serde::{Deserialize, Serialize};
+
+    /// 把 `preset` 包成最小结构，验证整数/字符串两种旧新输入都能解析。
+    #[derive(Serialize, Deserialize)]
+    struct W {
+        preset: EncodePreset,
+    }
+
+    #[test]
+    fn preset_deserializes_from_integer_new_format() {
+        // 新格式：`"preset":1`（整数码，P0 起落盘值）。
+        let w: W = serde_json::from_str(r#"{"preset":0}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Smooth);
+        let w: W = serde_json::from_str(r#"{"preset":1}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Balanced);
+        let w: W = serde_json::from_str(r#"{"preset":2}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Hd);
+    }
+
+    #[test]
+    fn preset_deserializes_from_legacy_string() {
+        // 旧格式：`"preset":"Balanced"`（P0 改整数码之前生成的 config.json）。
+        let w: W = serde_json::from_str(r#"{"preset":"Smooth"}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Smooth);
+        let w: W = serde_json::from_str(r#"{"preset":"Balanced"}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Balanced);
+        let w: W = serde_json::from_str(r#"{"preset":"Hd"}"#).unwrap();
+        assert_eq!(w.preset, EncodePreset::Hd);
+    }
+
+    #[test]
+    fn preset_rejects_unknown_discriminant_and_name() {
+        // 越界整数 → 报错。
+        assert!(serde_json::from_str::<W>(r#"{"preset":7}"#).is_err());
+        // 未知字符串 → 报错。
+        assert!(serde_json::from_str::<W>(r#"{"preset":"Turbo"}"#).is_err());
+    }
+
+    #[test]
+    fn preset_serializes_as_integer_not_string() {
+        // 序列化恒出整数（对齐前端 `Preset = 0|1|2`），避免写盘又变回字符串。
+        let json = serde_json::to_string(&W { preset: EncodePreset::Balanced }).unwrap();
+        assert_eq!(json, r#"{"preset":1}"#);
+        let json = serde_json::to_string(&W { preset: EncodePreset::Hd }).unwrap();
+        assert_eq!(json, r#"{"preset":2}"#);
     }
 }

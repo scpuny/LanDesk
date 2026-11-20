@@ -81,6 +81,9 @@ const P: Record<string, string> = {
   filter: '<path d="M22 3H2l8 9.5V19l4 2v-8.5z"/>',
   wifioff: '<path d="M2 2l20 20M8.5 16.1a6 6 0 0 1 7 0M5 12.5a11 11 0 0 1 3-2M2 8.8a16 16 0 0 1 5-2.8M14 5.8A16 16 0 0 1 22 8.8"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.4-4-7.4-9-7.4z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="11" cy="7.5" r="1"/><circle cx="15.5" cy="8.5" r="1"/><circle cx="7.5" cy="15.5" r="1"/>',
+  // 窗口控制（自绘主窗体三键，配合 data-tauri-drag-region 标题栏）
+  winMax: '<rect x="5" y="5" width="14" height="14" rx="1.5"/>',
+  winRestore: '<rect x="8" y="8" width="11" height="11" rx="1"/><path d="M8 8V6.5A2.5 2.5 0 0 1 10.5 4h7A2.5 2.5 0 0 1 19 6.5V8"/>',
   // 菜单图标（对齐设备页原型）
   video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',

@@ -5,10 +5,15 @@
 import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
+import { useWindowControls } from '../composables/useWindowControls'
 import type { SessionState, ConnMode, ControlAction, VideoFrameMsg } from '../types/index'
 import Icon from '../components/common/Icon.vue'
+import WindowControls from '../components/layout/WindowControls.vue'
 
 const { state, navigate, toast, confirm } = useUi()
+// 自绘主窗体：会话页顶栏即窗口标题栏（全屏沉浸态）。Win/Linux 无边框 → 静态区可拖 + 右侧自绘三键；
+// macOS overlay 交通灯 → 左侧留白（.ld-sess-top--mac）。
+const { isMac } = useWindowControls()
 const {
   reconnectPlan, loadReconnectPlan,
   isLive, liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
@@ -238,17 +243,17 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
 
 <template>
   <div class="ld-session">
-    <!-- 顶部工具条 -->
-    <header class="ld-sess-top">
-      <span class="ld-sess-state"><span class="ll-dot" :class="stateInfo.dot" /> {{ stateLabel }}</span>
-      <span class="ld-sess-target">
+    <!-- 顶部工具条（自绘主窗体下即窗口标题栏：Win/Linux 静态区可拖 + 右侧自绘三键；macOS 交通灯左侧留白） -->
+    <header class="ld-sess-top" :class="{ 'ld-sess-top--mac': isMac }" data-tauri-drag-region>
+      <span class="ld-sess-state" data-tauri-drag-region><span class="ll-dot" :class="stateInfo.dot" /> {{ stateLabel }}</span>
+      <span class="ld-sess-target" data-tauri-drag-region>
         <Icon name="monitor" :size="14" /> {{ targetName }}
         <span class="ll-tag" :class="pathClass">{{ pathTag }}</span>
         <span v-if="state.sessionTarget?.res" class="ld-mono">{{ state.sessionTarget.res }}</span>
       </span>
       <!-- 演示态切换器（仅非 live 开发预览用；live 态由会话命令面驱动） -->
       <button v-if="!isLive" class="ld-sess-tool" style="opacity:.6" title="切换会话状态预览" @click="cycleState"><Icon name="sliders" :size="14" /> 状态预览</button>
-      <div class="ld-sess-top__spacer" />
+      <div class="ld-sess-top__spacer" data-tauri-drag-region />
       <div class="ld-sess-tools">
         <button class="ld-sess-tool" @click="scaleMode = scaleMode === '自适应' ? '原始尺寸' : '自适应'"><Icon name="minimize" :size="14" /> {{ scaleMode }} <Icon name="chevronDown" :size="12" /></button>
         <button class="ld-sess-tool" @click="toast('已进入全屏（预览）', 'info')"><Icon name="fullscreen" :size="14" /> 全屏</button>
@@ -258,6 +263,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
         </button>
         <button v-else-if="state.sessionState === 'authfailed'" class="ll-btn ll-btn--default ll-btn--sm" @click="closeSession">× 关闭会话</button>
       </div>
+      <!-- Win/Linux 自绘三键（min/max/close）；macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
+      <WindowControls />
     </header>
 
     <!-- 画面区 -->

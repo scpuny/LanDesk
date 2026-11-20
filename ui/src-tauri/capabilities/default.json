@@ -1,0 +1,16 @@
+{
+  "$schema": "gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗能力：自绘标题栏（decorations:false）拖拽 + 窗口控制三键。Tauri v2 中 data-tauri-drag-region / startDragging 必须显式授 core:window:allow-start-dragging，否则静默失效。core:default 保持基线（事件/应用等核心能力不受影响）。",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging"
+  ]
+}

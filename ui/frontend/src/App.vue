@@ -6,15 +6,19 @@ import { useUi } from './composables/useUi'
 import { useTheme } from './composables/useTheme'
 import Icon from './components/common/Icon.vue'
 import LeftRail from './components/layout/LeftRail.vue'
+import WindowControls from './components/layout/WindowControls.vue'
 import ThemePanel from './components/dialogs/ThemePanel.vue'
 import ConfirmDialog from './components/dialogs/ConfirmDialog.vue'
 import DeviceList from './views/DeviceList.vue'
 import Session from './views/Session.vue'
 import Settings from './views/Settings.vue'
 import Logs from './views/Logs.vue'
+import { useWindowControls } from './composables/useWindowControls'
 
 const { state, toasts, confirmRequest, resolveConfirm } = useUi()
 const { pref } = useTheme()
+// 自绘主窗体：macOS 保留系统交通灯 → 顶栏左侧留白（.ld-topbar--mac）；Win/Linux 全自绘三键。
+const { isMac } = useWindowControls()
 
 const themeOpen = ref(false)
 
@@ -51,7 +55,11 @@ const currentView = computed(() => views[state.mainView] || DeviceList)
     </template>
 
     <template v-else>
-      <header class="ld-topbar">
+      <!-- 自绘主窗体：去系统标题栏后，顶栏即窗口标题栏。
+           静态区（logo/标题/占位）标 `data-tauri-drag-region` 可拖动窗口（Win/Linux 无边框窗）；
+           可点击控件（主题/通知/头像/窗口三键）**不**标（Tauri drag.js 约定须排除交互元素）。
+           macOS（交通灯 overlay）：左侧 `--mac` 留白避开原生交通灯，系统标题栏负责拖动。 -->
+      <header class="ld-topbar" :class="{ 'ld-topbar--mac': isMac }" data-tauri-drag-region>
         <div class="ld-brand">
           <span class="ld-brand__logo"><Icon name="monitor" :size="20" :width="2" /></span>
           <span class="ld-brand__text">
@@ -59,16 +67,18 @@ const currentView = computed(() => views[state.mainView] || DeviceList)
             <span class="ld-brand__sub">REMOTE DESKTOP</span>
           </span>
         </div>
-        <div class="ld-topbar__titles">
+        <div class="ld-topbar__titles" data-tauri-drag-region>
           <span class="ld-topbar__title">{{ title }}</span>
           <span class="ld-topbar__sub">{{ subtitle }}</span>
         </div>
-        <div class="ld-topbar__spacer" />
+        <div class="ld-topbar__spacer" data-tauri-drag-region />
         <div class="ld-topbar__actions">
           <button class="ld-icon-btn ld-theme-toggle" :title="'主题：' + pref" @click="themeOpen = !themeOpen"><Icon :name="pref === 'dark' ? 'moon' : 'sun'" :size="17" /></button>
           <button class="ld-icon-btn" title="通知" @click="toasts.length && toasts[0]"><Icon name="bell" :size="17" /></button>
           <span class="ld-avatar">陈</span>
         </div>
+        <!-- Win/Linux 自绘三键（min/max/close）；macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
+        <WindowControls />
         <ThemePanel :open="themeOpen" />
       </header>
 
