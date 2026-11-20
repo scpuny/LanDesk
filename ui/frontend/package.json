@@ -1,7 +1,7 @@
 {
   "name": "landesk-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "LanDesk 桌面端 Vue3 + TypeScript 前端：CSS Design Token 主题系统 + 双轨桥接",
   "scripts": {

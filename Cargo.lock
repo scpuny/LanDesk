@@ -121,7 +121,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "avcodec-wrap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lp",
  "thiserror 1.0.69",
@@ -242,7 +242,7 @@ checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 
 [[package]]
 name = "capture"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -333,7 +333,7 @@ checksum = "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79"
 
 [[package]]
 name = "clipboard"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lp",
  "thiserror 1.0.69",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "controlled"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "avcodec-wrap",
  "capture",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "controller"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "landesk-core",
@@ -434,7 +434,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "hkdf",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "ice"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.8",
  "serde",
@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "input"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lp",
  "thiserror 1.0.69",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "landesk-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "avcodec-wrap",
  "capture",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "landesk-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ice",
  "landesk-core",
@@ -941,7 +941,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "bincode",
@@ -975,7 +975,7 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mdns"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mdns-sd",
  "serde",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "quic-link"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "bytes",
@@ -1359,7 +1359,7 @@ checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "relay-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "quic-link",
  "thiserror 1.0.69",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "signaling"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "ice",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "signaling-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",
@@ -2014,7 +2014,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ui-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",

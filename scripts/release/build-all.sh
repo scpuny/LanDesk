@@ -93,6 +93,57 @@ BINS=(controlled controller)
 # 可选独立二进制
 OPTIONAL_BINS=(relay-server signaling-server)
 
+# 版本号自动读根 Cargo.toml（workspace 统一版本），不再硬编码
+PKG_VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+
+# ----------------------------------------------------------------------------
+# GUI 壳（Tauri landesk-app）：前端 dist 内嵌单文件；壳 vendor/ 存在则离线
+# （--offline，本地惯例），不存在则摘掉壳 .cargo/config.toml（crates-io 目录源
+# 替换）改走 crates.io 在线 + --locked（CI 场景；脚本内无条件还原配置）。
+# 系统 GUI 依赖缺失（webkit/gtk）时 cargo build 失败 → 跳过并提示，不阻塞 CLI。
+# ----------------------------------------------------------------------------
+build_gui_shell() {
+  local plat="$1"
+  case "${plat}" in
+    win)    local tgt="x86_64-pc-windows-msvc" ;;
+    linux)  local tgt="x86_64-unknown-linux-gnu" ;;
+    macos)  local tgt="" ;;   # 宿主原生（macOS runner）；跨 target 由 CI 矩阵负责
+    ok3568) echo "   [gui] linux aarch64 GUI 系统库未覆盖，跳过（CLI 兜底）"; return 0 ;;
+    *) return 0 ;;
+  esac
+
+  local out="${OUT_DIR}/${plat}/gui"; mkdir -p "${out}"
+  echo "-- [${plat}] GUI 壳 landesk-app（前端 dist 内嵌；缺系统 GUI 库则跳过）"
+  local cfg="ui/src-tauri/.cargo/config.toml"
+  local offline="true"
+  if [[ ! -d ui/src-tauri/vendor ]]; then
+    # CI：壳 vendor 未入库 → 摘离线配置，在线拉 crates.io（--locked 保确定性）
+    mv "${cfg}" "${cfg}.bak"
+    offline="${CARGO_NET_OFFLINE_OVERRIDE:-false}"
+    echo "   （壳 vendor/ 缺失，改走 crates.io 在线 + --locked）"
+  fi
+
+  echo "== [${plat}] 前端 npm ci + build"
+  ( cd ui/frontend && npm ci && npm run build ) || echo "   !! 前端构建失败，GUI 跳过"
+
+  echo "== [${plat}] cargo build --features tauri --release${tgt:+ --target ${tgt}}"
+  ( cd ui/src-tauri && \
+    CARGO_NET_OFFLINE="${offline}" \
+    cargo build --features tauri --release --locked ${tgt:+--target "${tgt}"} ) \
+    || echo "   !! GUI 构建失败（缺 webkit/gtk 系统库或前端产物），跳过 GUI 打包"
+
+  if [[ -f "${cfg}.bak" ]]; then mv "${cfg}.bak" "${cfg}"; fi   # 无条件还原
+
+  local bin; bin="$(find ui/src-tauri/target -maxdepth 3 -name 'landesk-app' -type f 2>/dev/null | head -1 || true)"
+  local exebin; exebin="$(find ui/src-tauri/target -maxdepth 3 -name 'landesk-app.exe' -type f 2>/dev/null | head -1 || true)"
+  if [[ -f "${exebin}" ]]; then bin="${exebin}"
+  elif [[ -z "${bin}" || ! -f "${bin}" ]]; then
+    echo "   [${plat}] 无 GUI 产物，跳过"; return 0
+  fi
+  cp -f "${bin}" "${out}/landesk-app$( [[ -f "${exebin}" && "${bin}" == *.exe ]] && echo .exe )"
+  echo "   [${plat}] GUI 产物 -> ${out}/landesk-app"
+}
+
 # ----------------------------------------------------------------------------
 # 构建单个平台的 Rust 二进制（cargo build --release）
 # ----------------------------------------------------------------------------
@@ -191,7 +242,7 @@ package_and_sign() {
       echo "-- [linux] 打包 deb + AppImage"
       # deb：fpm/dpkg 打包；AppImage：appimagetool
       if command -v fpm >/dev/null 2>&1; then
-        fpm -s dir -t deb -n landesk -v 0.1.0 \
+        fpm -s dir -t deb -n landesk -v "${PKG_VERSION}" \
           -C "${out}" -I controlled -I controller \
           --description "LanDesk 远程桌面" "${out}/landesk.deb" \
           || echo "   fpm 打包失败"
@@ -240,18 +291,22 @@ for p in "${PLATFORMS[@]}"; do
   case "${p}" in
     win)
       build_rust win "" 0
+      build_gui_shell win
       package_and_sign win "${OUT_DIR}/win"
       ;;
     linux)
       build_rust linux "" 0
+      build_gui_shell linux
       package_and_sign linux "${OUT_DIR}/linux"
       ;;
     macos)
       build_rust macos "" 0
+      build_gui_shell macos
       package_and_sign macos "${OUT_DIR}/macos"
       ;;
     ok3568)
       build_rust ok3568 aarch64-unknown-linux-gnu 1
+      build_gui_shell ok3568
       package_and_sign ok3568 "${OUT_DIR}/ok3568"
       ;;
     *)
