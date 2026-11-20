@@ -1,8 +1,10 @@
 // LanDesk 数据层单例：浏览器预览用 mock 数据，真实宿主走 lib/landesk.ts 桥接。
 import { reactive, ref, type Ref } from 'vue'
-import { landesk, detectLiveHost, type ReconnectSchedule, type RawLogLine } from '../lib/landesk'
+import {
+  landesk, detectLiveHost, type ReconnectSchedule, type RawLogLine,
+} from '../lib/landesk'
 import type {
-  DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo,
+  DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo, SessionStatus, ControlAction,
 } from '../types/index'
 
 // live 判定：Tauri（withGlobalTauri 注入 __TAURI__）或显式 __LANDesk_live__===true 可同步可知；
@@ -166,6 +168,58 @@ async function clearLogs(): Promise<void> {
   logs.value = []
 }
 
+// ---------- 会话命令面（P2 遗留 ①）：仅 live 生效（非 live 由 Session.vue 演示路径接管）----------
+// 建立/控制/状态/关闭 走后端 `session_*` 命令（Tauri）或 `/api/session/*`（REST）。
+// 出参统一 `SessionResp`（双宿主同形 P1.3）：成功带 `status`/`sent`，失败带 `error`（前端读 `error` 区分）。
+// 会话状态（`SessionStatus`）存 `liveSession`，`Session.vue` live 态据此渲染，替代 mock。
+const liveSession: Ref<SessionStatus | null> = ref<SessionStatus | null>(null)
+
+/** live 拉取当前会话状态（未连 = `idle`、无目标）。 */
+async function loadSessionStatus(): Promise<SessionStatus | null> {
+  if (!(await ensureLive())) return liveSession.value
+  try {
+    const resp = await landesk.sessionStatus()
+    liveSession.value = resp.status
+    return resp.status
+  } catch { liveSession.value = null; return null }
+}
+
+/** live 建立会话（FR-01 一键连接 + 鉴权）：出 `SessionResp`（成功 `status`，失败 `error` 区分 设备不在线 / 密码错）。 */
+async function connectSession(deviceId: string, password: string, sni?: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await ensureLive())) return { ok: false, error: 'not-live' }
+  try {
+    const resp = await landesk.sessionConnect(deviceId, password, sni)
+    liveSession.value = resp.status
+    if (resp.error) return { ok: false, error: resp.error }
+    return { ok: true }
+  } catch (e) {
+    liveSession.value = null
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** live 发送控制帧（FR-06/FR-07 键鼠 + 剪贴板）：出 `SessionResp`（`sent` 帧数；失败带 `error`）。 */
+async function sendControl(action: ControlAction): Promise<{ ok: boolean; sent?: number; error?: string }> {
+  if (!(await ensureLive())) return { ok: false, error: 'not-live' }
+  try {
+    const resp = await landesk.sessionSendControl(action)
+    liveSession.value = resp.status
+    if (resp.error) return { ok: false, error: resp.error }
+    return { ok: true, sent: resp.sent ?? undefined }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** live 关闭会话（FR-02.4）：出 `SessionResp`（`status` 落 `closed`）。 */
+async function closeSessionLive(): Promise<void> {
+  if (!(await ensureLive())) return
+  try {
+    const resp = await landesk.sessionClose()
+    liveSession.value = resp.status
+  } catch { liveSession.value = null }
+}
+
 export interface UseLanDeskReturn {
   isLive: Ref<boolean>
   local: LocalInfo
@@ -184,6 +238,12 @@ export interface UseLanDeskReturn {
   loadLogs: (level?: string, keyword?: string) => Promise<void>
   clearLogs: () => Promise<void>
   refreshTempPassword: () => void
+  // 会话命令面（P2 遗留 ①，仅 live 生效）
+  liveSession: Ref<SessionStatus | null>
+  loadSessionStatus: () => Promise<SessionStatus | null>
+  connectSession: (deviceId: string, password: string, sni?: string) => Promise<{ ok: boolean; error?: string }>
+  sendControl: (action: ControlAction) => Promise<{ ok: boolean; sent?: number; error?: string }>
+  closeSessionLive: () => Promise<void>
 }
 
 export function useLanDesk(): UseLanDeskReturn {
@@ -194,5 +254,6 @@ export function useLanDesk(): UseLanDeskReturn {
     reconnectPlan, loadReconnectPlan,
     logs, loadLogs, clearLogs,
     refreshTempPassword,
+    liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
   }
 }

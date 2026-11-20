@@ -2,14 +2,17 @@
 // 会话页：状态机驱动（state.sessionState），对齐 V2 设计稿四态 + PRD 七态。
 // 状态枚举做 class，中文文案放映射表，禁止中文写进 CSS 类名。
 // P1.2：重连浮层改用后端退避计划（reconnectPlan），替代硬编码 2/5 与 1/2/4/8s。
-import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
-import type { SessionState, ConnMode } from '../types/index'
+import type { SessionState, ConnMode, ControlAction } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
 const { state, navigate, toast, confirm } = useUi()
-const { reconnectPlan, loadReconnectPlan } = useLanDesk()
+const {
+  reconnectPlan, loadReconnectPlan,
+  isLive, liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
+} = useLanDesk()
 
 // 退避计划（后端下发；非 live 用默认预览序列 1/2/4/8/16s · 最多 5 次）。
 const maxAttempts = computed(() => reconnectPlan.value.max_attempts)
@@ -50,23 +53,89 @@ function closeSession() { setState('closed'); navigate('devices') }
 function cancel() { setState('idle'); navigate('devices'); toast('已取消连接', 'info') }
 async function disconnect() {
   const ok = await confirm({ title: '断开连接', message: '确定要断开当前远程会话吗？', confirmText: '断开', cancelText: '保持连接' })
-  if (ok) { setState('closed'); navigate('devices'); toast('会话已断开', 'info') }
+  if (!ok) return
+  // live：走后端 `session_close`（优雅断开 QUIC + 状态机落 Closed）；非 live 仅本地演示。
+  if (isLive.value) await closeSessionLive()
+  setState('closed'); navigate('devices'); toast('会话已断开', 'info')
 }
-function verify() {
+async function verify() {
   if (!password.value) { toast('请输入临时密码', 'warning'); return }
+  // live：凭临时密码重连当前目标（鉴权重试）；非 live 演示态直接转 running。
+  if (isLive.value && state.sessionTarget) {
+    const r = await connectSession(state.sessionTarget.id, password.value)
+    if (r.ok) { setState('running'); toast('鉴权成功，会话已建立') }
+    else { setState('authfailed'); toast(r.error || '鉴权失败', 'error') }
+    return
+  }
   setState('running'); toast('鉴权成功，会话已建立')
 }
-function retryNow() { setState('running'); toast('已手动重试并连接成功') }
+async function retryNow() {
+  // live：重新拨号当前目标（退避后手动重试）；非 live 演示态。
+  if (isLive.value && state.sessionTarget) {
+    const r = await connectSession(state.sessionTarget.id, password.value || '')
+    if (r.ok) { setState('running'); toast('已手动重试并连接成功') }
+    else { setState('reconnecting'); toast(r.error || '重连失败，继续退避', 'warning') }
+    return
+  }
+  setState('running'); toast('已手动重试并连接成功')
+}
 
-// 演示用：允许点击状态步骤切换（浏览器预览体验四态）
+// 演示用：允许点击状态步骤切换（仅非 live 浏览器预览体验四态；live 态由会话命令面驱动，禁用演示切换）。
 const demoStates: SessionState[] = ['auth', 'running', 'reconnecting', 'authfailed']
 function cycleState() {
+  if (isLive.value) { toast('已连接真实会话，状态由后端驱动', 'info'); return }
   const i = demoStates.indexOf(state.sessionState)
   setState(demoStates[(i + 1) % demoStates.length])
 }
 
+// live：工具栏键鼠 / 剪贴板 / 显示器控制意图 → 后端 `session_send_control`（非 live 保留演示 toast）。
+async function liveSend(action: ControlAction) {
+  if (!isLive.value) return
+  const r = await sendControl(action)
+  if (!r.ok) toast(r.error || '控制帧发送失败', 'error')
+  else if (action.type !== 'clipboardText' && action.type !== 'close') {
+    // 键鼠/编码器/显示器/心跳等即时操作给轻提示（剪贴板/关闭无逐条 toast）。
+    toast('已下发', 'success', 1200)
+  }
+}
+// 工具栏各控制按钮（live 走后端 session_send_control，非 live 保留演示 toast）。
+function onToolClipboard() {
+  if (isLive.value) { liveSend({ type: 'clipboardText', text: '' }); return }
+  toast('剪贴板同步已开启', 'info')
+}
+function onToolKeyboard() {
+  if (isLive.value) { liveSend({ type: 'keyDown', key: 0x10, mods: 0 }); return }
+  toast('键鼠控制已启用', 'info')
+}
+function onToolDisplay() {
+  if (isLive.value) { liveSend({ type: 'displaySwitch', index: 0 }); return }
+  toast('已切换到主显示器', 'info')
+}
+
+// live：后端会话状态快照 → 本地 `state`（状态机 + 目标 + 连接方式 + 度量），驱动顶部标签 + 底部状态栏。
+// 非 live 时 `liveSession` 恒 null，watcher 不写 `state`（演示路径保留）。
+watch(liveSession, (snap) => {
+  if (!snap) return
+  state.sessionState = snap.stateCode
+  state.path = snap.connModeCode
+  state.sessionTarget = snap.target
+    ? { name: snap.target.name, id: snap.target.id, res: snap.target.res }
+    : null
+  state.metrics = {
+    encoder: snap.encoder || 'QSV',
+    latency: snap.latencyMs ?? state.metrics.latency,
+    loss: snap.lossPct ?? 0,
+    bitrate: snap.bitrateMbps ?? state.metrics.bitrate,
+    reset: snap.reset,
+  }
+}, { immediate: true })
+
 let timer = null
-onMounted(() => { loadReconnectPlan() })
+onMounted(async () => {
+  loadReconnectPlan()
+  // live：拉当前会话状态快照（未连 = idle，据此渲染顶部标签 + 底部状态栏）。
+  await loadSessionStatus()
+})
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
@@ -80,8 +149,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         <span class="ll-tag" :class="pathClass">{{ pathTag }}</span>
         <span v-if="state.sessionTarget?.res" class="ld-mono">{{ state.sessionTarget.res }}</span>
       </span>
-      <!-- 演示态切换器（仅开发预览用） -->
-      <button class="ld-sess-tool" style="opacity:.6" title="切换会话状态预览" @click="cycleState"><Icon name="sliders" :size="14" /> 状态预览</button>
+      <!-- 演示态切换器（仅非 live 开发预览用；live 态由会话命令面驱动） -->
+      <button v-if="!isLive" class="ld-sess-tool" style="opacity:.6" title="切换会话状态预览" @click="cycleState"><Icon name="sliders" :size="14" /> 状态预览</button>
       <div class="ld-sess-top__spacer" />
       <div class="ld-sess-tools">
         <button class="ld-sess-tool" @click="scaleMode = scaleMode === '自适应' ? '原始尺寸' : '自适应'"><Icon name="minimize" :size="14" /> {{ scaleMode }} <Icon name="chevronDown" :size="12" /></button>
@@ -106,10 +175,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           <button @click="autoHideHint = false"><Icon name="close" :size="13" /></button>
         </div>
         <div class="ld-sess-toolrail">
-          <button title="剪贴板同步" @click="toast('剪贴板同步已开启', 'info')"><Icon name="clipboard" :size="17" /></button>
-          <button title="键鼠" @click="toast('键鼠控制已启用', 'info')"><Icon name="keyboard" :size="17" /></button>
-          <button title="截图" @click="toast('已截图', 'success')"><Icon name="camera" :size="17" /></button>
-          <button title="显示器切换" @click="toast('已切换到主显示器', 'info')"><Icon name="monitor" :size="17" /></button>
+          <button title="剪贴板同步" @click="onToolClipboard"><Icon name="clipboard" :size="17" /></button>
+          <button title="键鼠" @click="onToolKeyboard"><Icon name="keyboard" :size="17" /></button>
+          <button title="截图" @click="toast(isLive ? '截图帧已下发' : '已截图', 'success')"><Icon name="camera" :size="17" /></button>
+          <button title="显示器切换" @click="onToolDisplay"><Icon name="monitor" :size="17" /></button>
           <button title="全屏" @click="toast('全屏（预览）', 'info')"><Icon name="fullscreen" :size="17" /></button>
           <button class="is-danger" title="断开" @click="disconnect"><Icon name="power" :size="17" /></button>
         </div>
