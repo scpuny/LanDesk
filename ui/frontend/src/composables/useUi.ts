@@ -15,7 +15,7 @@ interface UiState {
 }
 
 const state = reactive<UiState>({
-  mainView: 'devices',
+  mainView: 'remote',
   sessionState: 'idle',
   sessionTarget: null,
   path: 'inner',

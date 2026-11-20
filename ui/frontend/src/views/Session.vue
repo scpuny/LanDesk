@@ -6,9 +6,15 @@ import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
 import { useWindowControls } from '../composables/useWindowControls'
+import { landesk } from '../lib/landesk'
 import type { SessionState, ConnMode, ControlAction, VideoFrameMsg } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 import WindowControls from '../components/layout/WindowControls.vue'
+
+// `standalone`：会话独立 OS 窗体（label "session"，Tauri `SessionApp` 渲染）时为 true——
+// 「关闭会话 / 返回设备列表 / 去开启中继」等回退动作**关闭本会话窗**（`window_close` 关调用方窗口），
+// 而非切主框 mainView（主框另有自己的设备/设置/日志视图）。浏览器单页沉浸（App.vue 直挂）为 false，走 navigate。
+const props = defineProps<{ standalone?: boolean }>()
 
 const { state, navigate, toast, confirm } = useUi()
 // 自绘主窗体：会话页顶栏即窗口标题栏（全屏沉浸态）。Win/Linux 无边框 → 静态区可拖 + 右侧自绘三键；
@@ -55,14 +61,24 @@ const pathTag = computed(() => pathTagMap[state.path] || '内网直连')
 const pathClass = computed(() => pathClassMap[state.path])
 
 function setState(s: SessionState) { state.sessionState = s }
-function closeSession() { setState('closed'); navigate('devices') }
-function cancel() { setState('idle'); navigate('devices'); toast('已取消连接', 'info') }
+// 会话窗 standalone 时「返回/关闭」= 关本 OS 窗（主框仍在）；单页沉浸时切回主框设备页。
+function goBack() {
+  if (props.standalone) { void landesk.windowClose(); return }
+  navigate('devices')
+}
+// 跳主框其它视图（设置/日志/设备）：standalone 会话窗没有这些视图 → 关窗回主框；单页沉浸直接 navigate。
+function leave(view: 'devices' | 'settings' | 'logs') {
+  if (props.standalone) { void landesk.windowClose(); return }
+  navigate(view)
+}
+function closeSession() { setState('closed'); goBack() }
+function cancel() { setState('idle'); goBack(); toast('已取消连接', 'info') }
 async function disconnect() {
   const ok = await confirm({ title: '断开连接', message: '确定要断开当前远程会话吗？', confirmText: '断开', cancelText: '保持连接' })
   if (!ok) return
   // live：走后端 `session_close`（优雅断开 QUIC + 状态机落 Closed）；非 live 仅本地演示。
   if (isLive.value) await closeSessionLive()
-  setState('closed'); navigate('devices'); toast('会话已断开', 'info')
+  setState('closed'); goBack(); toast('会话已断开', 'info')
 }
 async function verify() {
   if (!password.value) { toast('请输入临时密码', 'warning'); return }
@@ -348,7 +364,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
         </div>
         <div style="display:flex;gap:16px;font-size:12px;color:var(--ll-color-brand);margin-top:4px">
           <span class="ll-link" @click="cancel">← 返回设备列表</span>
-          <span class="ll-link" @click="navigate('logs')">▤ 查看失败详情日志</span>
+          <span class="ll-link" @click="leave('logs')">▤ 查看失败详情日志</span>
         </div>
       </div>
 
@@ -358,7 +374,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
         <div class="ld-sess-title" style="font-size:18px">无可用路径</div>
         <div class="ld-sess-desc">P2P 打洞失败，且未启用中继。请在设置中开启中继兜底，或确认双方网络可达。</div>
         <div class="ld-sess-actions">
-          <button class="ll-btn ll-btn--primary" @click="navigate('settings')"><Icon name="settings" :size="14" /> 去开启中继</button>
+          <button class="ll-btn ll-btn--primary" @click="leave('settings')"><Icon name="settings" :size="14" /> 去开启中继</button>
           <button class="ll-btn ll-btn--default" @click="cancel">返回设备列表</button>
         </div>
       </div>
@@ -368,7 +384,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
         <div class="ld-sess-bigicon" style="background:rgba(255,255,255,.08);color:#9aa6ba"><Icon name="monitor" :size="30" /></div>
         <div class="ld-sess-title" style="font-size:18px">{{ state.sessionState === 'closed' ? '会话已关闭' : '尚未连接远程设备' }}</div>
         <div class="ld-sess-desc">在设备列表选择一台设备，或在首页输入对方设备码发起连接</div>
-        <button class="ll-btn ll-btn--primary" @click="navigate('devices')"><Icon name="monitor" :size="14" /> 去选择设备</button>
+        <button class="ll-btn ll-btn--primary" @click="leave('devices')"><Icon name="monitor" :size="14" /> 去选择设备</button>
       </div>
     </div>
 

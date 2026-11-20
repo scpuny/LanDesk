@@ -2042,6 +2042,7 @@ name = "landesk-app"
 version = "0.1.0"
 dependencies = [
  "landesk-ui",
+ "serde",
  "tauri",
  "tauri-build",
  "tokio",

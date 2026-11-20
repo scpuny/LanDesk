@@ -10,6 +10,7 @@ import WindowControls from './components/layout/WindowControls.vue'
 import ThemePanel from './components/dialogs/ThemePanel.vue'
 import ConfirmDialog from './components/dialogs/ConfirmDialog.vue'
 import DeviceList from './views/DeviceList.vue'
+import Remote from './views/Remote.vue'
 import Session from './views/Session.vue'
 import Settings from './views/Settings.vue'
 import Logs from './views/Logs.vue'
@@ -35,6 +36,7 @@ onMounted(() => document.addEventListener('pointerdown', onDocPointerDown))
 onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDown))
 
 const titles = {
+  remote: ['远程控制', '发起连接 · 本机设备码 · 运行状态'],
   devices: ['我的设备', '3 秒找到设备 · 一次点击连接'],
   session: ['远程会话', '实时画面 · 加密通道 · 状态可视'],
   settings: ['设置', '受控配置 · 连接方式 · 日志策略'],
@@ -43,8 +45,8 @@ const titles = {
 const title = computed(() => titles[state.mainView]?.[0] || '')
 const subtitle = computed(() => titles[state.mainView]?.[1] || '')
 
-const views = { devices: DeviceList, session: Session, settings: Settings, logs: Logs }
-const currentView = computed(() => views[state.mainView] || DeviceList)
+const views = { remote: Remote, devices: DeviceList, session: Session, settings: Settings, logs: Logs }
+const currentView = computed(() => views[state.mainView] || Remote)
 </script>
 
 <template>
@@ -77,8 +79,8 @@ const currentView = computed(() => views[state.mainView] || DeviceList)
           <button class="ld-icon-btn" title="通知" @click="toasts.length && toasts[0]"><Icon name="bell" :size="17" /></button>
           <span class="ld-avatar">陈</span>
         </div>
-        <!-- Win/Linux 自绘三键（min/max/close）；macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
-        <WindowControls />
+        <!-- Win/Linux 自绘控制键；主框去掉「最大化」（本软件只需 最小化 + 关闭），macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
+        <WindowControls noMax />
         <ThemePanel :open="themeOpen" />
       </header>
 

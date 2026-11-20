@@ -195,8 +195,8 @@ export interface ConfirmRequest {
   cancelText: string
 }
 
-/** 主视图标识 */
-export type MainView = 'devices' | 'session' | 'settings' | 'logs'
+/** 主视图标识（`remote` 远程控制页置顶；`session` 会话页 Tauri 态渲染在独立 OS 窗体，浏览器预览态兜底单页） */
+export type MainView = 'remote' | 'devices' | 'session' | 'settings' | 'logs'
 
 /** 明暗偏好 */
 export type ThemePref = 'light' | 'dark' | 'system'

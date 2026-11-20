@@ -1,10 +1,13 @@
 <script setup lang="ts">
-// 自绘主窗体窗口控制三键（最小化 / 最大化·还原 / 关闭），配合去系统标题栏。
+// 自绘窗体窗口控制键（最小化 / 最大化·还原 / 关闭），配合去系统标题栏。
 // 平台感知：macOS 保留系统交通灯（`titleBarStyle:overlay`）→ 本组件不渲染（父顶栏左侧留白）；
-// Windows / Linux 全自绘（`decorations:false`）→ 渲染三键。浏览器预览无窗口可控 → 隐藏。
+// Windows / Linux 全自绘（`decorations:false`）→ 渲染。浏览器预览无窗口可控 → 隐藏。
+// `noMax`：主窗体去掉「最大化」（本软件主框只需最小化 + 关闭）；会话独立 OS 窗体保留完整三键。
 // 按钮**不**标 `data-tauri-drag-region`（可点击元素须排除拖拽，Tauri drag.js 约定）。
 import { useWindowControls } from '../../composables/useWindowControls'
 import Icon from '../common/Icon.vue'
+
+defineProps<{ noMax?: boolean }>()
 
 const { showControls, onMinimize, onMaximize, onClose } = useWindowControls()
 </script>
@@ -14,7 +17,7 @@ const { showControls, onMinimize, onMaximize, onClose } = useWindowControls()
     <button class="ld-win-ctrl__btn" title="最小化" aria-label="最小化" @click="onMinimize">
       <Icon name="minus" :size="14" />
     </button>
-    <button class="ld-win-ctrl__btn" title="最大化" aria-label="最大化 / 还原" @click="onMaximize">
+    <button v-if="!noMax" class="ld-win-ctrl__btn" title="最大化" aria-label="最大化 / 还原" @click="onMaximize">
       <Icon name="winMax" :size="13" />
     </button>
     <button class="ld-win-ctrl__btn ld-win-ctrl__btn--close" title="关闭" aria-label="关闭" @click="onClose">
