@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{header, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -21,10 +21,15 @@ use axum::{
 };
 use clap::Parser;
 use landesk_ui::{
-    Config, ConfigStore, DeviceTable, HoleResult, PathDecisionView, ReconnectScheduler,
-    decide_path, schedule_of, view_of,
+    device_code_from, Config, ConfigStore, DeviceTable, HoleResult, LogLine, LogRing,
+    PathDecisionView, ReconnectScheduler, decide_path, gen_temp_password, local_info_of,
+    schedule_of, view_of,
 };
 use mdns::Listener;
+use tracing::{Event, Subscriber, field};
+use tracing_subscriber::{
+    Layer, layer::{Context, SubscriberExt}, registry::LookupSpan, util::SubscriberInitExt,
+};
 
 /// 默认托管的前端构建产物目录（相对本仓根；可用 `--static-dir` 覆盖）。
 fn default_static_dir() -> PathBuf {
@@ -46,13 +51,14 @@ struct Args {
     discover: u64,
 }
 
-/// 共享状态：mDNS 监听器 + 在线设备表 + 配置存储 + 静态目录。
+/// 共享状态：mDNS 监听器 + 在线设备表 + 配置存储 + 日志环形缓冲 + 静态目录。
 /// 手动 `Clone`（`Listener` 非 Clone，用 `Arc<Mutex<…>>` 共享）。
 #[derive(Clone)]
 struct Ctx {
     listener: Arc<Mutex<Option<Listener>>>,
     devices: Arc<Mutex<DeviceTable>>,
     store: ConfigStore,
+    ring: Arc<Mutex<LogRing>>,
     static_dir: PathBuf,
 }
 
@@ -72,6 +78,79 @@ struct ReconnectReq {
     used_attempts: u32,
 }
 
+/// `/api/logs` 查询参数（camelCase 对齐前端 `LogFilter` / 关键字）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LogQuery {
+    /// 级别过滤（`ALL`/`INFO`/`WARN`/`ERROR`/`DEBUG`；缺省 `ALL`）。
+    level: Option<String>,
+    /// 关键字（过滤 `mod`/`msg`/`kv`，小写匹配；缺省不限）。
+    q: Option<String>,
+}
+
+/// 把 `tracing` 事件捕获进共享 [`LogRing`] 的 [`Layer`]（P2「日志查询 API」）。
+///
+/// 与 `fmt` 层并存（终端仍打印），同时把每条事件写进环形缓冲供 `/api/logs` 查询。
+/// `ring` 用 `Arc<Mutex<LogRing>>` 共享给 [`Ctx`]；当前条数用 `LogRing::len` 读。
+struct RingLayer {
+    ring: Arc<Mutex<LogRing>>,
+}
+
+impl RingLayer {
+    fn new(ring: Arc<Mutex<LogRing>>) -> Self {
+        Self { ring }
+    }
+}
+
+impl<S> Layer<S> for RingLayer
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    Self: 'static,
+{
+    fn on_event(&self, event: &Event, _ctx: Context<S>) {
+        let meta = event.metadata();
+        let level = meta.level().as_str();
+        let target = meta.target();
+        // 提取 message 正文 + 其余键值字段（`k=v` 拼接）。
+        let mut kv = KvVisitor::default();
+        event.record(&mut kv);
+        let line = LogLine::new(level, target, &kv.message, &kv.kv, LogLine::now_micros());
+        self.ring.lock().unwrap().push(line);
+    }
+}
+
+/// 提取 [`Event`] 字段的 [`Visit`] 访问器：`message` 字段作正文，其余拼成 `k=v` 串。
+///
+/// 覆写 `record_str`（字符串值去引号，最干净）+ `record_debug`（兜底，`DisplayValue` 的
+/// Debug 委托 Display 故 message 正文不带引号；`&str` 的 Debug 会带引号故单独走 `record_str`）。
+#[derive(Default)]
+struct KvVisitor {
+    message: String,
+    kv: String,
+}
+
+impl field::Visit for KvVisitor {
+    fn record_str(&mut self, field: &field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        } else if self.kv.is_empty() {
+            self.kv = format!("{}={value}", field.name());
+        } else {
+            self.kv.push_str(&format!(" {}={value}", field.name()));
+        }
+    }
+
+    fn record_debug(&mut self, field: &field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
+        } else if self.kv.is_empty() {
+            self.kv = format!("{}={value:?}", field.name());
+        } else {
+            self.kv.push_str(&format!(" {}={value:?}", field.name()));
+        }
+    }
+}
+
 /// 当前 unix 时间（秒）。
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -83,7 +162,19 @@ fn now_secs() -> u64 {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    tracing_subscriber::fmt().init();
+
+    // 日志环形缓冲（P2「日志查询 API」）：捕获层与共享 Ctx 各持一份 Arc。
+    let ring = Arc::new(Mutex::new(LogRing::new()));
+
+    // tracing：终端 fmt 层（带 env-filter）+ 环形缓冲捕获层并存。
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(RingLayer::new(Arc::clone(&ring)))
+        .init();
 
     let static_dir = args.static_dir.clone().unwrap_or_else(default_static_dir);
     tracing::info!(bind = %args.bind, static_dir = %static_dir.display(), "ui-server 启动");
@@ -104,6 +195,7 @@ async fn main() {
         listener: Arc::new(Mutex::new(listener)),
         devices: Arc::new(Mutex::new(DeviceTable::new())),
         store: ConfigStore::new(),
+        ring,
         static_dir: static_dir.clone(),
     };
 
@@ -192,6 +284,39 @@ async fn main() {
             "/api/reconnect-schedule",
             get(|| async move {
                 Json(schedule_of(&ReconnectScheduler::default_policy())).into_response()
+            }),
+        )
+        // 本机信息（P2.8「本机信息 API」，矩阵 §7.5）：喂设备页左栏「本机卡」。
+        // 设备码/临时密码由本机态派生（`device_code_from` 稳定摘要 + `gen_temp_password`）；
+        // mDNS 广播态 = 监听器是否起来了；`enc` 未接数据面探测，保守空值。
+        .route(
+            "/api/local-info",
+            get(|State(ctx): State<Ctx>| async move {
+                let cfg = ctx.store.load_or_init().unwrap_or_default();
+                let mdns_advertising = ctx.listener.lock().unwrap().is_some();
+                let online = mdns_advertising;
+                let device_code = device_code_from(&cfg.device_name);
+                let temp_password = gen_temp_password();
+                let info = local_info_of(&cfg, &device_code, &temp_password, vec![], mdns_advertising, online);
+                Json(info).into_response()
+            }),
+        )
+        // 日志查询（P2.8「日志查询 API」，矩阵 §7.5）：环形缓冲 + 级别/关键字过滤。
+        .route(
+            "/api/logs",
+            get(|State(ctx): State<Ctx>, Query(q): Query<LogQuery>| async move {
+                let level = q.level.unwrap_or_else(|| "ALL".into());
+                let kw = q.q.unwrap_or_default();
+                let lines = ctx.ring.lock().unwrap().export_lines(&level, &kw);
+                Json(lines).into_response()
+            }),
+        )
+        // 日志清空（P2.8「日志导出/清空 API」，矩阵 §7.5）。
+        .route(
+            "/api/logs/clear",
+            post(|State(ctx): State<Ctx>| async move {
+                ctx.ring.lock().unwrap().clear();
+                StatusCode::NO_CONTENT.into_response()
             }),
         )
         // 静态托管 + SPA fallback（未匹配路径 → index.html）。

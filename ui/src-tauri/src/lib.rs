@@ -13,17 +13,20 @@ pub mod commands;
 
 // ---------- Tauri 本体（仅 feature `tauri` 时编译；离线 vendor 不含 tauri）----------
 
-/// 共享状态（`tauri::State`）：状态栏快照（FR-09.3）+ 设备在线表（P1.1 下沉，FR-01.2/01.4）。
+/// 共享状态（`tauri::State`）：状态栏快照（FR-09.3）+ 设备在线表（P1.1 下沉，FR-01.2/01.4）
+/// + 日志环形缓冲（P2.7，矩阵 §7.5，喂日志页查询/清空）。
 ///
 /// `devices` 用 `Arc<Mutex<DeviceTable>>`：后台任务驱动 mDNS 监听器并把在线表快照镜像进来，
 /// `device_list` 命令（无入参）读它出剪枝+排序行——对齐 `apps/ui-server` 的 `/api/devices`。
+/// `ring` 用 `Arc<Mutex<LogRing>>`：`tracing` 捕获层写入、`log_query`/`log_clear` 命令读写。
 #[cfg(feature = "tauri")]
 pub mod state {
-    use landesk_ui::{DeviceTable, StatusBarModel};
+    use landesk_ui::{DeviceTable, LogRing, StatusBarModel};
 
     pub struct AppState {
         pub status: std::sync::Mutex<StatusBarModel>,
         pub devices: std::sync::Arc<std::sync::Mutex<DeviceTable>>,
+        pub ring: std::sync::Arc<std::sync::Mutex<LogRing>>,
     }
 }
 
@@ -84,6 +87,52 @@ fn choose_path(
     landesk_ui::PathDecisionView::from(&commands::choose_path(inner_found, &hole, relay_enabled))
 }
 
+/// 本机信息（P2.7「本机信息 API」，矩阵 §7.5）：出 [`landesk_ui::LocalInfo`] 喂设备页左栏「本机卡」。
+/// 设备码/临时密码由宿主态派生（`device_code_from` 稳定摘要 + `gen_temp_password`），
+/// `mdns_advertising`/`online` 读壳内共享设备表是否非空（有在线设备 = 本机可达）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn local_info(state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
+    let store = landesk_ui::ConfigStore::new();
+    let cfg = store.load_or_init()?;
+    let device_code = landesk_ui::device_code_from(&cfg.device_name);
+    let temp_password = landesk_ui::gen_temp_password();
+    // 编码能力未接数据面探测，保守空值；mDNS/在线态由设备表驱动。
+    let mut devices = state.devices.lock().unwrap();
+    let online = !devices.rows(landesk_ui::now_secs()).is_empty();
+    let mdns_advertising = online;
+    let info = commands::local_info(
+        &store,
+        &device_code,
+        &temp_password,
+        vec![],
+        mdns_advertising,
+        online,
+    )?;
+    Ok(info)
+}
+
+/// 日志查询（P2.7「日志查询 API」，矩阵 §7.5）：环形缓冲 + 级别/关键字过滤（最旧→最新）。
+/// `level`/`keyword` 可空（None = 不限），对齐前端 `LogFilter` / 关键字语义。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn log_query(
+    state: tauri::State<'_, state::AppState>,
+    level: Option<String>,
+    keyword: Option<String>,
+) -> Vec<landesk_ui::LogLine> {
+    let level = level.unwrap_or_else(|| "ALL".into());
+    let keyword = keyword.unwrap_or_default();
+    commands::log_query(&state.ring.lock().unwrap(), &level, &keyword)
+}
+
+/// 日志清空（P2.7「日志清空 API」，矩阵 §7.5）：计数归零，容量不变。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn log_clear(state: tauri::State<'_, state::AppState>) {
+    commands::log_clear(&mut state.ring.lock().unwrap());
+}
+
 /// 构建并运行 Tauri app（feature `tauri`；需 Tauri CLI + GUI 系统依赖）。
 #[cfg(feature = "tauri")]
 pub fn run() {
@@ -121,10 +170,20 @@ pub fn run() {
         }
     });
 
+    // 共享日志环形缓冲（P2.7）：捕获层写入、`log_query`/`log_clear` 命令读写。
+    let ring: std::sync::Arc<std::sync::Mutex<landesk_ui::LogRing>> =
+        Arc::new(std::sync::Mutex::new(landesk_ui::LogRing::new()));
+
+    // 最小 `tracing` 订阅器：把事件捕获进 `ring`（离线安全——只依赖壳 lock 里已传的
+    // `tracing`/`tracing-core`，不引 `tracing-subscriber`/新 crate，守壳离线门纯净）。
+    // 终端无输出（GUI 壳日志进环形缓冲供日志页查询，不刷 stdout 污染 Tauri 窗体）。
+    install_ring_subscriber(Arc::clone(&ring));
+
     tauri::Builder::default()
         .manage(AppState {
             status: std::sync::Mutex::new(landesk_ui::StatusBarModel::new()),
             devices,
+            ring,
         })
         .invoke_handler(tauri::generate_handler![
             config_load_or_init,
@@ -132,8 +191,82 @@ pub fn run() {
             device_list,
             reconnect_view,
             reconnect_schedule,
-            choose_path
+            choose_path,
+            local_info,
+            log_query,
+            log_clear
         ])
         .run(tauri::generate_context!())
         .expect("tauri app 启动");
+}
+
+/// 安装一个最小 [`tracing::Subscriber`]：每条事件提取 `level`/`target`/`message` +
+/// 键值串，写进共享 [`landesk_ui::LogRing`]（对齐 `apps/ui-server` 的 `RingLayer`，但
+/// **不依赖 `tracing-subscriber`**——壳 vendor 无该 crate，手搓 `Subscriber` 保离线门纯净）。
+///
+/// span 方法（`new_span`/`record`/`enter`/`exit`）空实现；只在 `event` 里捕获事件。
+#[cfg(feature = "tauri")]
+fn install_ring_subscriber(ring: std::sync::Arc<std::sync::Mutex<landesk_ui::LogRing>>) {
+    struct RingSubscriber {
+        ring: std::sync::Arc<std::sync::Mutex<landesk_ui::LogRing>>,
+    }
+
+    impl tracing::Subscriber for RingSubscriber {
+        /// 全收（环形缓冲自身限容 `DEFAULT_LOG_CAPACITY`，前端查询再过滤）。
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(0x1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            let meta = event.metadata();
+            let mut kv = RingVisitor::default();
+            event.record(&mut kv);
+            let line = landesk_ui::LogLine::new(
+                meta.level().as_str(),
+                meta.target(),
+                &kv.message,
+                &kv.kv,
+                landesk_ui::LogLine::now_micros(),
+            );
+            self.ring.lock().unwrap().push(line);
+        }
+    }
+
+    /// 提取 [`tracing::Event`] 字段的 `field::Visit`：`message` 作正文，其余拼 `k=v`。
+    #[derive(Default)]
+    struct RingVisitor {
+        message: String,
+        kv: String,
+    }
+
+    impl tracing::field::Visit for RingVisitor {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "message" {
+                self.message = value.to_string();
+            } else if self.kv.is_empty() {
+                self.kv = format!("{}={value}", field.name());
+            } else {
+                self.kv.push_str(&format!(" {}={value}", field.name()));
+            }
+        }
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" {
+                self.message = format!("{value:?}");
+            } else if self.kv.is_empty() {
+                self.kv = format!("{}={value:?}", field.name());
+            } else {
+                self.kv.push_str(&format!(" {}={value:?}", field.name()));
+            }
+        }
+    }
+
+    let sub = RingSubscriber { ring };
+    // `set_default` 失败（Tauri 自身已装全局订阅器）不致命——保留默认，日志页空即可。
+    let _ = tracing::subscriber::set_default(sub);
 }
