@@ -64,17 +64,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
-        # 无论 checkout 是否被 git autocrlf / 嵌套 .gitattributes(text=auto) 转成 CRLF，
-        # 都从 git 对象库（blob 恒为 LF）重新展开 vendor/ 工作区文件：git archive 读原始
-        # blob、tar -x 原样落盘，完全绕开行尾转换，保证 工作区字节 == .cargo-checksum.json
-        # 记录的 sha256。比单纯 git config 更可靠（config 可能被 runner 镜像覆盖）。
-        # shell: bash 保证 Windows 走 Git Bash；tar 的 mtime 警告在个别平台可能非 0 退出，
-        # 故 tar 用 `|| true`，以探针文件哈希为权威校验（python3 跨 mac/win/linux 均自带，
-        # 不用 macOS 没有的 sha256sum）。
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
+        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
         shell: bash
         run: |
           set -uo pipefail
-          git archive HEAD -- vendor/ | tar -x -C . 2>/dev/null || true
+          git config core.autocrlf false
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
           want="$(git cat-file blob "HEAD:${probe}" \
                    | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
@@ -168,17 +169,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
-        # 无论 checkout 是否被 git autocrlf / 嵌套 .gitattributes(text=auto) 转成 CRLF，
-        # 都从 git 对象库（blob 恒为 LF）重新展开 vendor/ 工作区文件：git archive 读原始
-        # blob、tar -x 原样落盘，完全绕开行尾转换，保证 工作区字节 == .cargo-checksum.json
-        # 记录的 sha256。比单纯 git config 更可靠（config 可能被 runner 镜像覆盖）。
-        # shell: bash 保证 Windows 走 Git Bash；tar 的 mtime 警告在个别平台可能非 0 退出，
-        # 故 tar 用 `|| true`，以探针文件哈希为权威校验（python3 跨 mac/win/linux 均自带，
-        # 不用 macOS 没有的 sha256sum）。
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
+        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
         shell: bash
         run: |
           set -uo pipefail
-          git archive HEAD -- vendor/ | tar -x -C . 2>/dev/null || true
+          git config core.autocrlf false
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
           want="$(git cat-file blob "HEAD:${probe}" \
                    | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
@@ -255,17 +257,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
-        # 无论 checkout 是否被 git autocrlf / 嵌套 .gitattributes(text=auto) 转成 CRLF，
-        # 都从 git 对象库（blob 恒为 LF）重新展开 vendor/ 工作区文件：git archive 读原始
-        # blob、tar -x 原样落盘，完全绕开行尾转换，保证 工作区字节 == .cargo-checksum.json
-        # 记录的 sha256。比单纯 git config 更可靠（config 可能被 runner 镜像覆盖）。
-        # shell: bash 保证 Windows 走 Git Bash；tar 的 mtime 警告在个别平台可能非 0 退出，
-        # 故 tar 用 `|| true`，以探针文件哈希为权威校验（python3 跨 mac/win/linux 均自带，
-        # 不用 macOS 没有的 sha256sum）。
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
+        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
         shell: bash
         run: |
           set -uo pipefail
-          git archive HEAD -- vendor/ | tar -x -C . 2>/dev/null || true
+          git config core.autocrlf false
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
           want="$(git cat-file blob "HEAD:${probe}" \
                    | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
@@ -345,17 +348,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
-        # 无论 checkout 是否被 git autocrlf / 嵌套 .gitattributes(text=auto) 转成 CRLF，
-        # 都从 git 对象库（blob 恒为 LF）重新展开 vendor/ 工作区文件：git archive 读原始
-        # blob、tar -x 原样落盘，完全绕开行尾转换，保证 工作区字节 == .cargo-checksum.json
-        # 记录的 sha256。比单纯 git config 更可靠（config 可能被 runner 镜像覆盖）。
-        # shell: bash 保证 Windows 走 Git Bash；tar 的 mtime 警告在个别平台可能非 0 退出，
-        # 故 tar 用 `|| true`，以探针文件哈希为权威校验（python3 跨 mac/win/linux 均自带，
-        # 不用 macOS 没有的 sha256sum）。
+        # 无论 checkout 是否被 git autocrlf(Windows 默认 true) / 嵌套 .gitattributes(text=auto)
+        # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
+        # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
+        # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
+        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
+        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
         shell: bash
         run: |
           set -uo pipefail
-          git archive HEAD -- vendor/ | tar -x -C . 2>/dev/null || true
+          git config core.autocrlf false
+          git checkout -f HEAD -- vendor/ \
+            || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
           want="$(git cat-file blob "HEAD:${probe}" \
                    | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
