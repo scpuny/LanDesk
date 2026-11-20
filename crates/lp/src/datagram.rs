@@ -61,6 +61,46 @@ pub struct VideoDgram {
 impl VideoDgram {
     pub const FRAG_LAST_BIT: u8 = 0x80;
 
+    /// 单包 NALU 载荷上限（`DGRAM_MAX` 减 10B 报头）。NALU 不超过此值走单包，否则分片。
+    pub const FRAG_PAYLOAD_MAX: usize = crate::DGRAM_MAX - 10;
+
+    /// 把一条完整 NALU 切分为可发送的 [`VideoDgram`] 分片序列（对齐 protocol.md §2.2）。
+    ///
+    /// - 单片（NALU 载荷 ≤ [`Self::FRAG_PAYLOAD_MAX`]）→ 一个 `frag=0x80`（分片号 0 + 末片）包；
+    /// - 多片 → 高 7 bit 为递增分片号，末片置 bit7；首片额外置 [`FLAG_FIRST`]（解码器 flush 点）。
+    ///
+    /// 接收端 [`crate::jitter::JitterBuffer`] 按 `seq` + 分片号拼接还原整条 NALU。
+    /// 返回的分片可直接 `encode_plain` 后经 QUIC Datagram 发送。
+    pub fn fragment_nalu(nalu: &[u8], seq: u16, kind: u8, flags: u8) -> Vec<VideoDgram> {
+        if nalu.len() <= Self::FRAG_PAYLOAD_MAX {
+            return vec![VideoDgram {
+                seq,
+                kind,
+                frag: Self::FRAG_LAST_BIT,
+                flags,
+                nalu: nalu.to_vec(),
+            }];
+        }
+        let total = nalu.len();
+        let count = total.div_ceil(Self::FRAG_PAYLOAD_MAX);
+        (0..count)
+            .map(|i| {
+                let off = i * Self::FRAG_PAYLOAD_MAX;
+                let end = (off + Self::FRAG_PAYLOAD_MAX).min(total);
+                let is_last = i + 1 == count;
+                let frag = (i as u8) | ((is_last as u8) * Self::FRAG_LAST_BIT);
+                let f = if i == 0 { flags | FLAG_FIRST } else { flags };
+                VideoDgram {
+                    seq,
+                    kind,
+                    frag,
+                    flags: f,
+                    nalu: nalu[off..end].to_vec(),
+                }
+            })
+            .collect()
+    }
+
     pub const fn frag_no(&self) -> u8 {
         self.frag & !Self::FRAG_LAST_BIT
     }
@@ -124,5 +164,52 @@ impl VideoDgram {
         }
         let nalu = buf[HEADER..need].to_vec();
         Ok(Self { seq, kind, frag, flags, nalu })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jitter::JitterBuffer;
+
+    #[test]
+    fn fragment_single_packet_for_small_nalu() {
+        let nalu: Vec<u8> = (0..100).collect();
+        let frags = VideoDgram::fragment_nalu(&nalu, 7, NaluKind::PFrame as u8, 0);
+        assert_eq!(frags.len(), 1, "100B < 1222B 走单包");
+        assert_eq!(frags[0].frag, VideoDgram::FRAG_LAST_BIT, "单包即末片（分片号 0）");
+        assert!(frags[0].is_last(), "单包末片位置起");
+        assert_eq!(frags[0].seq, 7);
+        assert_eq!(frags[0].nalu, nalu);
+    }
+
+    #[test]
+    fn fragment_split_and_reassemble() {
+        // 3000B NALU > 1222B/片 → ceil(3000/1222)=3 片（1222+1222+556）。
+        let nalu: Vec<u8> = (0..3000usize).map(|i| (i % 256) as u8).collect();
+        let frags = VideoDgram::fragment_nalu(&nalu, 42, NaluKind::Idr as u8, 0);
+        assert_eq!(frags.len(), 3, "3000B 应切 3 片");
+        // 首片带 FLAG_FIRST（解码器 flush 点）；末片置 bit7。
+        assert_eq!(frags[0].flags, FLAG_FIRST, "首片置 FLAG_FIRST");
+        assert!(!frags[1].is_last(), "非末片 bit7=0");
+        assert!(frags[2].is_last(), "末片 bit7=1");
+        // 喂进 JitterBuffer 逐片拼接，末片到达时还原整条 NALU。
+        let mut jb = JitterBuffer::new();
+        assert!(jb.push(&frags[0]).is_none(), "中间分片不成帧");
+        assert!(jb.push(&frags[1]).is_none(), "中间分片不成帧");
+        let f = jb.push(&frags[2]).expect("末片到达应成帧");
+        assert_eq!(f.nalu, nalu, "重组 NALU 与原始一致");
+        assert_eq!(f.seq, 42);
+        assert!(f.is_idr(), "kind=Idr 保留");
+    }
+
+    #[test]
+    fn fragment_edge_exact_capacity() {
+        // 恰好 1222B（= FRAG_PAYLOAD_MAX）→ 单片。
+        let nalu = vec![0u8; VideoDgram::FRAG_PAYLOAD_MAX];
+        assert_eq!(VideoDgram::fragment_nalu(&nalu, 1, 2, 0).len(), 1);
+        // 1223B → 2 片。
+        let nalu = vec![0u8; VideoDgram::FRAG_PAYLOAD_MAX + 1];
+        assert_eq!(VideoDgram::fragment_nalu(&nalu, 1, 2, 0).len(), 2);
     }
 }

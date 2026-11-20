@@ -1,7 +1,7 @@
 // LanDesk 前端 ↔ 后端桥接封装（对齐 ui/src-tauri 的 Tauri 命令 + apps/ui-server 的 REST）。
 // 双轨降级：Tauri 宿主走 invoke；浏览器走 REST /api/*。
 // 出参为 landesk-ui 的可序列化模型（JSON 直进组件）。
-import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo } from '../types/index'
+import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo, VideoFrameMsg } from '../types/index'
 import type { ControlAction, SessionResp } from '../types/index'
 
 /** ICE 打洞三态（对齐 `ice::HoleResult`，serde 默认按变体名序列化）。 */
@@ -209,6 +209,29 @@ export const landesk = {
     return isTauri()
       ? tauriInvoke<SessionResp>('session_close')
       : rest<SessionResp>('/api/session/close', { method: 'POST' })
+  },
+
+  // ---------- 视频数据面（P2 遗留 ②，矩阵 §7.5「画面」）----------
+  // 画面帧经 `VideoDgram` 分片 → QUIC datagram → 控制端 `JitterBuffer` 重组为完整 NALU，
+  // 由宿主逐帧送达前端（出参 `VideoFrameMsg`，`nalu` 为 base64 裸 H.264 字节）：
+  //  - Tauri 桌面：`session_video_poll` **同步拉取**（`try_recv` 排空本轮 `Vec<VideoFrameMsg>`，
+  //    前端 ~33ms 轮询一次；非 live / 未建会话返回空数组，不抛错）。
+  //  - 浏览器 REST：`GET /api/session/video` **SSE 推流**（`EventSource`，逐帧 `data:` 事件）。
+  // 两种传输在 `useLanDesk.startVideoStream` 里按宿主分流（Tauri→poll / 浏览器→SSE），上层无感。
+
+  /** Tauri 宿主：同步拉取自上次以来新到的画面帧（排空本轮队列）。
+   *  非 Tauri 宿主返回空数组（浏览器轨走 `sessionVideoStreamUrl` + `EventSource`）。 */
+  sessionVideoPoll(): Promise<VideoFrameMsg[]> {
+    return isTauri()
+      ? tauriInvoke<VideoFrameMsg[]>('session_video_poll')
+      : Promise.resolve([])
+  },
+
+  /** 浏览器宿主：返回 SSE 画面流端点 URL（相对路径，与 ui-server 同域）。
+   *  `EventSource(url)` 逐帧推送 `VideoFrameMsg` JSON；无活跃会话时服务端回 404。
+   *  Tauri 宿主走 `sessionVideoPoll`，此 URL 不会被消费。 */
+  sessionVideoStreamUrl(): string {
+    return '/api/session/video'
   },
 }
 

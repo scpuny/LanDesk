@@ -15,18 +15,20 @@ use std::sync::{Arc, Mutex};
 use axum::{
     extract::{Query, Request, State},
     http::{header, Method, StatusCode},
-    response::{IntoResponse, Response},
+    response::{sse::Event, IntoResponse, Response, Sse},
     routing::{get, post},
     Json, Router,
 };
 use clap::Parser;
+use futures_util::stream;
 use landesk_ui::{
     device_code_from, ControlAction, Config, ConfigStore, DeviceTable, HoleResult, LogLine,
     LogRing, OnlineDevice, PathDecisionView, ReconnectScheduler, SessionManager, SessionResp,
-    decide_path, gen_temp_password, local_info_of, schedule_of, view_of,
+    VideoFrameMsg, decide_path, gen_temp_password, local_info_of, schedule_of, view_of,
 };
 use mdns::Listener;
-use tracing::{Event, Subscriber, field};
+use std::convert::Infallible;
+use tracing::{Event as TraceEvent, Subscriber, field};
 use tracing_subscriber::{
     Layer, layer::{Context, SubscriberExt}, registry::LookupSpan, util::SubscriberInitExt,
 };
@@ -134,7 +136,7 @@ where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     Self: 'static,
 {
-    fn on_event(&self, event: &Event, _ctx: Context<S>) {
+    fn on_event(&self, event: &TraceEvent, _ctx: Context<S>) {
         let meta = event.metadata();
         let level = meta.level().as_str();
         let target = meta.target();
@@ -417,6 +419,33 @@ async fn main() {
                 let mut mgr = ctx.session.lock().await;
                 mgr.close();
                 Json(SessionResp::ok(mgr.status_view())).into_response()
+            }),
+        )
+        // 视频画面推流（P2②，矩阵 §7.5「画面」）：把 `SessionManager` 视频泵
+        // （`connect` 时起的后台重组任务，`recv_video_datagram` → `JitterBuffer` → NALU）
+        // 出的 [`VideoFrameMsg`] 流式推给前端（SSE）。前端 `EventSource` 逐帧 `atob` 还原
+        // NALU 喂 WebCodecs `VideoDecoder`。无活跃会话 → 404（前端据此保持占位/演示画面）。
+        .route(
+            "/api/session/video",
+            get(|State(ctx): State<Ctx>| async move {
+                let mut mgr = ctx.session.lock().await;
+                let rx = mgr.take_video_rx();
+                drop(mgr);
+                // `take_video_rx` 移走泵入端（mpsc `Receiver`）；无会话为 `None` → 404。
+                let Some(rx) = rx else {
+                    tracing::warn!("视频推流：无活跃会话（先 connect 再拉画面）");
+                    return (StatusCode::NOT_FOUND, "no active session").into_response();
+                };
+                // `mpsc::Receiver` → SSE 事件流：逐帧把 `VideoFrameMsg` 序列化成 JSON 走
+                // `data:` 字段（NALU 为 base64 字符串），前端 `EventSource` `JSON.parse` 还原。
+                // 泵结束 / 会话关闭时 `recv` 返回 `None` → 流 EOS。`Infallible` 错误型对齐
+                // `axum::Sse`（本流只产 `Ok`）。
+                let stream = stream::unfold(rx, |mut rx| async move {
+                    let msg: VideoFrameMsg = rx.recv().await?;
+                    let json = serde_json::to_string(&msg).ok()?;
+                    Some((Ok(Event::default().data(json)) as Result<Event, Infallible>, rx))
+                });
+                Sse::new(stream).into_response()
             }),
         )
         // 静态托管 + SPA fallback（未匹配路径 → index.html）。

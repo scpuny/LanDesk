@@ -4,7 +4,7 @@ import {
   landesk, detectLiveHost, type ReconnectSchedule, type RawLogLine,
 } from '../lib/landesk'
 import type {
-  DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo, SessionStatus, ControlAction,
+  DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo, SessionStatus, ControlAction, VideoFrameMsg,
 } from '../types/index'
 
 // live 判定：Tauri（withGlobalTauri 注入 __TAURI__）或显式 __LANDesk_live__===true 可同步可知；
@@ -220,6 +220,55 @@ async function closeSessionLive(): Promise<void> {
   } catch { liveSession.value = null }
 }
 
+// ---------- 视频数据面（P2 遗留 ②，矩阵 §7.5「画面」）----------
+// 画面帧通路：受控端 capture→encode→`VideoDgram` 分片→QUIC datagram→控制端 `JitterBuffer` 重组
+// →宿主逐帧送达前端（`VideoFrameMsg`，`nalu` 为 base64 裸 H.264 字节）。宿主分流：
+//   - Tauri 桌面：`session_video_poll` **同步拉取**（每轮 `try_recv` 排空 `Vec`，~33ms 轮询）。
+//   - 浏览器 REST：`GET /api/session/video` **SSE 推流**（`EventSource`，逐帧 `data:` 事件）。
+// `startVideoStream(onFrame)` 返回 `stop` 句柄；`onFrame` 每收到一帧调一次。
+// 模块级单例（与 `isLive`/`liveSession` 一致），重复 start 幂等。
+
+let videoPollTimer: ReturnType<typeof setInterval> | null = null
+let videoSse: EventSource | null = null
+let videoRunning = false
+
+/** 启动画面流。非 live 时 no-op；live 时按宿主分流（Tauri 轮询 / 浏览器 SSE）。
+ *  返回停止句柄（等价 `stopVideoStream`）。 */
+function startVideoStream(onFrame: (f: VideoFrameMsg) => void): () => void {
+  if (videoRunning) return stopVideoStream
+  void (async () => {
+    if (!(await ensureLive())) return
+    videoRunning = true
+    if (window.__TAURI__?.core?.invoke) {
+      // Tauri 桌面轨：同步轮询 session_video_poll（每轮排空 try_recv 队列）。
+      videoPollTimer = setInterval(() => {
+        landesk.sessionVideoPoll()
+          .then((frames) => { for (const f of frames || []) onFrame(f) })
+          .catch(() => { /* 单轮失败不中断轮询（会话断开时命令回空数组/报错，均安全） */ })
+      }, 33)
+    } else {
+      // 浏览器轨：SSE 逐帧推（EventSource 内建自动重连；无会话回 404 → 未 open 即停，避免重连风暴）。
+      const sse = new EventSource(landesk.sessionVideoStreamUrl())
+      let sseOpen = false
+      sse.onopen = () => { sseOpen = true }
+      sse.onmessage = (ev: MessageEvent) => {
+        try { onFrame(JSON.parse(ev.data) as VideoFrameMsg) }
+        catch { /* 非帧事件 / 解析失败忽略 */ }
+      }
+      sse.onerror = () => { if (!sseOpen) sse.close() }
+      videoSse = sse
+    }
+  })()
+  return stopVideoStream
+}
+
+/** 停止画面流（清轮询定时器 + 关 SSE）。幂等。 */
+function stopVideoStream(): void {
+  videoRunning = false
+  if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null }
+  if (videoSse) { videoSse.close(); videoSse = null }
+}
+
 export interface UseLanDeskReturn {
   isLive: Ref<boolean>
   local: LocalInfo
@@ -244,6 +293,9 @@ export interface UseLanDeskReturn {
   connectSession: (deviceId: string, password: string, sni?: string) => Promise<{ ok: boolean; error?: string }>
   sendControl: (action: ControlAction) => Promise<{ ok: boolean; sent?: number; error?: string }>
   closeSessionLive: () => Promise<void>
+  // 视频数据面（P2 遗留 ②，仅 live 生效）
+  startVideoStream: (onFrame: (f: VideoFrameMsg) => void) => () => void
+  stopVideoStream: () => void
 }
 
 export function useLanDesk(): UseLanDeskReturn {
@@ -255,5 +307,6 @@ export function useLanDesk(): UseLanDeskReturn {
     logs, loadLogs, clearLogs,
     refreshTempPassword,
     liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
+    startVideoStream, stopVideoStream,
   }
 }

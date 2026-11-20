@@ -218,6 +218,23 @@ async fn session_close(state: tauri::State<'_, state::AppState>) -> Result<lande
     Ok(landesk_ui::SessionResp::ok(mgr.status_view()))
 }
 
+/// 视频画面轮询（P2②，矩阵 §7.5「画面」，桌面宿主推流）：非阻塞取走 `SessionManager`
+/// 视频泵（`connect` 时后台重组任务，`recv_video_datagram` → `JitterBuffer` → NALU）
+/// 当前已就绪的全部 [`landesk_ui::VideoFrameMsg`]（`nalu` 为 base64）。前端定时调本命令
+/// （~33ms）喂 WebCodecs `VideoDecoder` 渲进画面区；无会话 / 无新帧返回 `[]`。
+///
+/// 浏览器（`ui-server`）宿主走 SSE 流（`/api/session/video`）而非轮询——桌面 Tauri 命令
+/// 不便挂长连接，故用「取走接收端 + 轮询」双轨：SSE 用 `take_video_rx`、Tauri 用 `poll_video`。
+/// 同步命令：`try_lock` 拿不到锁（另一条会话命令在跑）本轮跳过，画面不丢（泵缓冲 32）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn session_video_poll(state: tauri::State<'_, state::AppState>) -> Vec<landesk_ui::VideoFrameMsg> {
+    match state.session.try_lock() {
+        Ok(mut mgr) => mgr.poll_video(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// 构建并运行 Tauri app（feature `tauri`；需 Tauri CLI + GUI 系统依赖）。
 #[cfg(feature = "tauri")]
 pub fn run() {
@@ -297,7 +314,8 @@ pub fn run() {
             session_connect,
             session_send_control,
             session_status,
-            session_close
+            session_close,
+            session_video_poll
         ])
         .run(tauri::generate_context!())
         .expect("tauri app 启动");

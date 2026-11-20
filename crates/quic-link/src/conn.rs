@@ -151,4 +151,35 @@ impl QuicConnection {
             Err(_) => Err(QuicLinkError::ControlClosed),
         }
     }
+
+    /// 克隆出一个**可独立持有**的视频 Datagram 接收句柄（`Send + Sync + 'static`）。
+    ///
+    /// `quinn::Connection` 是 `Clone`（共享底层 UDP 驱动 + datagram 收发队列），
+    /// 克隆出的接收者与原连接共用 `read_datagram()` 通道。故可 `move` 进后台
+    /// `tokio::spawn` 的推流任务，**不持有** `OneClickSession` 的控制流 `&mut` 锁
+    /// ——视频接收与控制帧收发互不阻塞（P2② 画面推流）。
+    pub fn video_rx(&self) -> VideoDatagramRx {
+        VideoDatagramRx {
+            conn: self.conn.clone(),
+        }
+    }
+}
+
+/// 视频 Datagram 接收句柄（[`QuicConnection`] 的 `&self` 克隆视图，可跨任务持有）。
+///
+/// 见 [`QuicConnection::video_rx`]；后台推流泵用它在独立任务里循环读视频 Datagram，
+/// 与控制流锁解耦。
+#[derive(Debug, Clone)]
+pub struct VideoDatagramRx {
+    conn: Connection,
+}
+
+impl VideoDatagramRx {
+    /// 读下一个视频 Datagram（明文）；连接关闭返回 [`QuicLinkError::ControlClosed`]。
+    pub async fn recv(&self) -> Result<Vec<u8>, QuicLinkError> {
+        match self.conn.read_datagram().await {
+            Ok(dg) => Ok(dg.to_vec()),
+            Err(_) => Err(QuicLinkError::ControlClosed),
+        }
+    }
 }
