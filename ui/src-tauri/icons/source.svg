@@ -1,22 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <!-- 主渐变：品牌蓝，多 stop 制造纵向纵深 -->
-    <linearGradient id="bg" x1="0.08" y1="0" x2="0.88" y2="1">
-      <stop offset="0" stop-color="#7DB4FF"/>
-      <stop offset="0.28" stop-color="#5B98F8"/>
-      <stop offset="0.62" stop-color="#3B7AEC"/>
-      <stop offset="1" stop-color="#2356C6"/>
+    <!-- 主渐变：仅靠品牌蓝自身的明度/色相梯度造层次，不叠白色，通透不发虚 -->
+    <linearGradient id="bg" x1="0.05" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#9CCBFF"/>
+      <stop offset="0.22" stop-color="#6BA8FF"/>
+      <stop offset="0.48" stop-color="#3F7FF0"/>
+      <stop offset="0.72" stop-color="#2A5ED2"/>
+      <stop offset="1" stop-color="#15379C"/>
     </linearGradient>
-    <!-- 左上柔光：模拟顶部光源 -->
-    <radialGradient id="glow" cx="0.3" cy="0.18" r="0.78">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.40"/>
-      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.10"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <!-- 右下暗角：增加立体纵深 -->
-    <radialGradient id="vignette" cx="0.46" cy="0.4" r="0.76">
-      <stop offset="0.55" stop-color="#0B2E6E" stop-opacity="0"/>
-      <stop offset="1" stop-color="#0B2E6E" stop-opacity="0.30"/>
+    <!-- 边缘暗角：深色压边，只收四角不糊中间 -->
+    <radialGradient id="vignette" cx="0.5" cy="0.45" r="0.62">
+      <stop offset="0.6" stop-color="#0A2C68" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0A2C68" stop-opacity="0.24"/>
     </radialGradient>
     <!-- 屏幕内凹：比背景更深的蓝 -->
     <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
@@ -30,12 +25,9 @@
 
   <!-- 四周留白：内容缩放至画布中央，透明边距约 8.6%，避免 macOS 程序坞中被撑满 -->
   <g transform="translate(88 88) scale(0.828125)">
-    <!-- 圆角方形底：主渐变 + 柔光 + 暗角三层叠加 -->
+    <!-- 圆角方形底：纯蓝色梯度 + 深色暗角，无白色叠加 -->
     <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#bg)"/>
-    <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#glow)"/>
     <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#vignette)"/>
-    <!-- 顶部内边缘微光 -->
-    <rect x="12" y="12" width="1000" height="1000" rx="216" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="6"/>
 
     <!-- 显示器：实心白框 + 内凹深蓝屏，带柔和投影 -->
     <g filter="url(#softShadow)">
