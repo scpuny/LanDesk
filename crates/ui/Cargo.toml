@@ -11,10 +11,13 @@ landesk-core = { workspace = true }
 mdns = { workspace = true }
 ice = { workspace = true }
 quic-link = { workspace = true }
+lp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+# 剪贴板 SHA-256 校验（FR-07.2，`session::clip_sha256`；主仓 vendor 已含 0.10.9，离线安全）。
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

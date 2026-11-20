@@ -21,9 +21,9 @@ use axum::{
 };
 use clap::Parser;
 use landesk_ui::{
-    device_code_from, Config, ConfigStore, DeviceTable, HoleResult, LogLine, LogRing,
-    PathDecisionView, ReconnectScheduler, decide_path, gen_temp_password, local_info_of,
-    schedule_of, view_of,
+    device_code_from, ControlAction, Config, ConfigStore, DeviceTable, HoleResult, LogLine,
+    LogRing, OnlineDevice, PathDecisionView, ReconnectScheduler, SessionManager, SessionResp,
+    decide_path, gen_temp_password, local_info_of, schedule_of, view_of,
 };
 use mdns::Listener;
 use tracing::{Event, Subscriber, field};
@@ -51,14 +51,17 @@ struct Args {
     discover: u64,
 }
 
-/// 共享状态：mDNS 监听器 + 在线设备表 + 配置存储 + 日志环形缓冲 + 静态目录。
-/// 手动 `Clone`（`Listener` 非 Clone，用 `Arc<Mutex<…>>` 共享）。
+/// 共享状态：mDNS 监听器 + 在线设备表 + 配置存储 + 日志环形缓冲 + 会话管理器 + 静态目录。
+/// 手动 `Clone`（`Listener` 非 Clone，用 `Arc<Mutex<…>>` 共享；`SessionManager` 是异步会话，
+/// 用 `Arc<tokio::sync::Mutex<…>>` 跨 handler 串行化 connect/send_control/close）。
 #[derive(Clone)]
 struct Ctx {
     listener: Arc<Mutex<Option<Listener>>>,
     devices: Arc<Mutex<DeviceTable>>,
     store: ConfigStore,
     ring: Arc<Mutex<LogRing>>,
+    /// 会话管理器（P2 遗留 ①，矩阵 §7.5）：QUIC 客户端 + 活跃会话 + 状态栏折叠。
+    session: Arc<tokio::sync::Mutex<SessionManager>>,
     static_dir: PathBuf,
 }
 
@@ -87,6 +90,30 @@ struct LogQuery {
     /// 关键字（过滤 `mod`/`msg`/`kv`，小写匹配；缺省不限）。
     q: Option<String>,
 }
+
+/// `/api/session/connect` 入参（P2 遗留 ①，矩阵 §7.5「会话建立」）：设备ID + 访问密码。
+///
+/// `sni` 缺省 `"localhost"`（环回 / 同机）；跨机传受控端主机名。`device_id` 须经
+/// `/api/devices`（共享 [`DeviceTable`]）解析出 `ip:port` 拨号目标（FR-01）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionConnectReq {
+    device_id: String,
+    password: String,
+    #[serde(default)]
+    sni: Option<String>,
+}
+
+/// `/api/session/control` 入参（矩阵 §7.5「键鼠 / 剪贴板 / 截图 / 显示器」）：一条控制意图。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionControlReq {
+    action: ControlAction,
+}
+
+// 会话出参统一外壳（P2 遗留 ①，双宿主响应形状归一）：经 `landesk_ui::SessionResp`，
+// 与 `ui/src-tauri` 命令出参同形——成功带 `status`/`sent`，失败带 `error`（HTTP 恒 200）。
+// （`SessionResp` 定义在 `landesk-ui::manager`，经 `landesk_ui` re-export；此处不再本地重复定义。）
 
 /// 把 `tracing` 事件捕获进共享 [`LogRing`] 的 [`Layer`]（P2「日志查询 API」）。
 ///
@@ -196,6 +223,14 @@ async fn main() {
         devices: Arc::new(Mutex::new(DeviceTable::new())),
         store: ConfigStore::new(),
         ring,
+        // 会话管理器（P2 遗留 ①）：信任任意证书的 QUIC 客户端（LAN 内网信任域，FR-01）。
+        // `insecure_default` 自动装 quinn 内置 ring provider（宿主不必直接依赖 quinn/ring）。
+        session: Arc::new(tokio::sync::Mutex::new(
+            SessionManager::new(
+                landesk_ui::QuicClient::insecure_default("0.0.0.0:0".parse().expect("0.0.0.0:0"))
+                    .expect("quic client init"),
+            ),
+        )),
         static_dir: static_dir.clone(),
     };
 
@@ -317,6 +352,71 @@ async fn main() {
             post(|State(ctx): State<Ctx>| async move {
                 ctx.ring.lock().unwrap().clear();
                 StatusCode::NO_CONTENT.into_response()
+            }),
+        )
+        // ---------- 会话命令面（P2 遗留 ①，矩阵 §7.5「会话建立/鉴权/断开 + 画面/键鼠/剪贴板/截图/显示器」）----------
+        // 会话建立（FR-01 一键连接）：设备ID 经共享 DeviceTable 解析 ip:port，QUIC 拨号 + 握手。
+        .route(
+            "/api/session/connect",
+            post(|State(ctx): State<Ctx>, Json(req): Json<SessionConnectReq>| async move {
+                // 先取设备（std Mutex，非跨 await 持有），未命中 → 无路径。
+                let dev: Option<OnlineDevice> = {
+                    let mut devices = ctx.devices.lock().unwrap();
+                    devices.find_online(&req.device_id, now_secs())
+                };
+                let sni = req.sni.unwrap_or_else(|| "localhost".into());
+                let mut mgr = ctx.session.lock().await;
+                match &dev {
+                    Some(d) => match mgr.connect(d, &req.password, &sni).await {
+                        Ok(v) => Json(SessionResp::ok(v)).into_response(),
+                        Err(e) => {
+                        tracing::warn!(%req.device_id, error = %e, "会话建立失败");
+                        Json(SessionResp::fail(Some(mgr.status_view()), e.to_string())).into_response()
+                        }
+                    },
+                    None => {
+                        tracing::warn!(%req.device_id, "目标设备不在线（未发现 / 已过期）");
+                        Json(SessionResp::fail(
+                            Some(mgr.status_view()),
+                            "device not online",
+                        ))
+                        .into_response()
+                    }
+                }
+            }),
+        )
+        // 发送控制帧（FR-06 键鼠 / FR-07 剪贴板 / FR-04.5 编码 / FR-03.3 显示器）：意图展开成 1..N 帧逐帧发出。
+        .route(
+            "/api/session/control",
+            post(|State(ctx): State<Ctx>, Json(req): Json<SessionControlReq>| async move {
+                let mut mgr = ctx.session.lock().await;
+                match mgr.send_control(&req.action).await {
+                    Ok(sent) => {
+                        let status = mgr.status_view();
+                        Json(SessionResp::ok_sent(status, sent)).into_response()
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "发送控制帧失败");
+                        Json(SessionResp::fail(Some(mgr.status_view()), e.to_string())).into_response()
+                    }
+                }
+            }),
+        )
+        // 会话状态（FR-09.3）：出当前状态机 + 折叠快照（未连 = idle）。
+        .route(
+            "/api/session/status",
+            get(|State(ctx): State<Ctx>| async move {
+                let mgr = ctx.session.lock().await;
+                Json(SessionResp::ok(mgr.status_view())).into_response()
+            }),
+        )
+        // 会话关闭（FR-02.4）：优雅断开 + 状态机落 Closed。
+        .route(
+            "/api/session/close",
+            post(|State(ctx): State<Ctx>| async move {
+                let mut mgr = ctx.session.lock().await;
+                mgr.close();
+                Json(SessionResp::ok(mgr.status_view())).into_response()
             }),
         )
         // 静态托管 + SPA fallback（未匹配路径 → index.html）。

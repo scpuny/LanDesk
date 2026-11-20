@@ -16,8 +16,10 @@ pub mod config_store;
 pub mod devices;
 pub mod local_info;
 pub mod logs;
+pub mod manager;
 pub mod plan;
 pub mod reconnect_view;
+pub mod session;
 pub mod status;
 
 pub use config_store::{ConfigStore, StoreError, default_config_path};
@@ -26,17 +28,27 @@ pub use local_info::{
     device_code_from, gen_temp_password, local_info_of, LocalInfo,
 };
 pub use logs::{LevelFilter, LogLine, LogRing, DEFAULT_LOG_CAPACITY};
+pub use manager::{SendControlError, SessionManager, SessionResp};
 pub use plan::{decide_path, PathDecision, PathDecisionView};
 pub use reconnect_view::{ReconnectSchedule, ReconnectView, schedule_of, view_of};
+pub use session::{
+    conn_mode_code, expand, clip_sha256, clip_text_to_msgs, session_state_code,
+    ControlAction, ExpandError, MOD_ALT, MOD_CTRL, MOD_META, MOD_SHIFT,
+    SessionStatusView, SessionTargetView,
+};
 pub use status::{StatusBarModel, conn_mode_label, encoder_label, state_label};
 
 // ---------- 命令内核便捷 re-export（Tauri 壳只依赖 `landesk-ui` 即可取到全部业务类型）----------
 pub use ice::HoleResult;
 pub use landesk_core::config::{Config, ConfigError};
 pub use landesk_core::events::CoreEvent;
+pub use landesk_core::error::CoreError;
+pub use landesk_core::oneclick::{Controlled, Controller, OneClickSession};
 pub use landesk_core::reconnect::{BackoffPolicy, ReconnectScheduler};
 pub use landesk_core::SessionState;
+pub use lp::msg::ControlMsg;
 pub use mdns::OnlineDevice;
 pub use mdns::Listener;
 pub use quic_link::ConnMode;
+pub use quic_link::QuicClient;
 

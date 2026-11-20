@@ -85,6 +85,15 @@ impl DeviceTable {
         device_rows(&mut self.devices, now)
     }
 
+    /// 按设备ID 出**未过期**的在线设备（P2 遗留 ①，会话建立前解析 `ip:port`）。
+    ///
+    /// 先按 `now` TTL 剪枝（过期设备不连），再从在线表里找 `id`；命中 `None`
+    /// （未发现 / 已过期）由宿主落「无路径」/「设备不存在」。`&mut`（剪枝改长度）。
+    pub fn find_online(&mut self, id: &str, now: u64) -> Option<OnlineDevice> {
+        let _ = prune_stale(&mut self.devices, now);
+        self.devices.iter().find(|d| d.ad.id == id).cloned()
+    }
+
     /// 当前设备数（剪枝前，供设备计数 / 角标）。
     pub fn len(&self) -> usize {
         self.devices.len()
@@ -156,8 +165,20 @@ mod tests {
     }
 
     #[test]
-    fn device_table_mirrors_snapshot_prunes_and_sorts() {
-        // P1.1：宿主把监听器在线表快照镜像进来，再经 rows 出剪枝+排序行。
+    fn find_online_by_id_prunes_stale() {
+        let mut t = DeviceTable::new();
+        t.apply_snapshot(vec![
+            dev("fresh", "fresh", "10.0.0.1", 90, false),
+            dev("old", "old", "10.0.0.2", 1, false),
+        ]);
+        // now=100：fresh 在线（last_seen=90 < 45s 过期窗），old 已过期（last_seen=1）。
+        assert!(t.find_online("fresh", 100).is_some(), "在线设备可解析");
+        assert!(t.find_online("old", 100).is_none(), "过期设备被剪枝不返回（FR-01.4）");
+        assert!(t.find_online("nope", 100).is_none(), "未知 id 返回 None");
+    }
+
+    #[test]
+    fn device_table_mirrors_snapshot_prunes_and_sorts() {        // P1.1：宿主把监听器在线表快照镜像进来，再经 rows 出剪枝+排序行。
         let mut t = DeviceTable::new();
         assert!(t.is_empty());
         t.apply_snapshot(vec![

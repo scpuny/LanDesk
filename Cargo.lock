@@ -891,10 +891,12 @@ version = "0.1.0"
 dependencies = [
  "ice",
  "landesk-core",
+ "lp",
  "mdns",
  "quic-link",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
 ]
