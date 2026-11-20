@@ -7,7 +7,8 @@
 
 use landesk_ui::{
     Config, ConfigStore, CoreEvent, DeviceRow, HoleResult, OnlineDevice, PathDecision,
-    ReconnectScheduler, ReconnectView, StatusBarModel, decide_path, device_rows, view_of,
+    ReconnectSchedule, ReconnectScheduler, ReconnectView, StatusBarModel, decide_path,
+    device_rows, schedule_of, view_of,
 };
 
 /// 配置页：读或首次生成默认模板（FR-08）。
@@ -33,6 +34,12 @@ pub fn apply_status(model: &mut StatusBarModel, ev: &CoreEvent) {
 /// 重连指示器：由调度器进度出 UI 视图（FR-05.4，接 M7）。
 pub fn reconnect_view(sched: &ReconnectScheduler) -> Option<ReconnectView> {
     view_of(sched)
+}
+
+/// 重连退避计划（P1.2「会话命令面」，FR-05.4）：出完整 1/2/4/8/16 计划，
+/// 喂 `Session.vue` 重连浮层替代硬编码 `2/5`。
+pub fn reconnect_schedule(sched: &ReconnectScheduler) -> ReconnectSchedule {
+    schedule_of(sched)
 }
 
 /// 连接路径决策（FR-05/FR-11）：内网→P2P→中继→NoPath。

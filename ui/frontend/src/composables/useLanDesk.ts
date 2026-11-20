@@ -1,6 +1,6 @@
 // LanDesk 数据层单例：浏览器预览用 mock 数据，真实宿主走 lib/landesk.ts 桥接。
 import { reactive, ref, type Ref } from 'vue'
-import { landesk, detectLiveHost } from '../lib/landesk'
+import { landesk, detectLiveHost, type ReconnectSchedule } from '../lib/landesk'
 import type {
   DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo,
 } from '../types/index'
@@ -64,6 +64,18 @@ const configLoading = ref<boolean>(false)
 const configError = ref<string>('')
 const logs: Ref<LogLine[]> = ref<LogLine[]>([...mockLogs])
 
+// 重连退避计划（P1.2）：live 走后端 `reconnectSchedule()`，非 live 用与默认
+// ReconnectScheduler 一致的退避序列作预览数据（1/2/4/8/16s · 最多 5 次）。
+const reconnectPlan: Ref<ReconnectSchedule> = ref<ReconnectSchedule>({
+  max_attempts: 5, waits: [1, 2, 4, 8, 16], label: '指数退避 1s/2s/4s/8s/16s · 最多 5 次',
+})
+async function loadReconnectPlan(): Promise<void> {
+  if (await ensureLive()) {
+    try { reconnectPlan.value = await landesk.reconnectSchedule() }
+    catch { /* 保留默认预览计划 */ }
+  }
+}
+
 interface RawDevice {
   id: string; name: string; addr: string; res: string
   enc?: string | string[]; relay?: boolean; online?: boolean; last_seen?: number
@@ -74,7 +86,7 @@ async function loadDevices(): Promise<void> {
   if (!(await ensureLive())) { devices.value = [...mockDevices]; return }
   deviceLoading.value = true
   try {
-    const rows: RawDevice[] = await landesk.deviceList([], Math.floor(Date.now() / 1000)) || []
+    const rows: RawDevice[] = await landesk.deviceList() || []
     devices.value = rows.map((d): DeviceRow => ({
       id: d.id, name: d.name, addr: d.addr, res: d.res,
       enc: typeof d.enc === 'string' ? d.enc.split(',').filter(Boolean) : (d.enc || []),
@@ -122,6 +134,8 @@ export interface UseLanDeskReturn {
   configError: Ref<string>
   loadConfig: () => Promise<void>
   saveConfig: () => Promise<void>
+  reconnectPlan: Ref<ReconnectSchedule>
+  loadReconnectPlan: () => Promise<void>
   logs: Ref<LogLine[]>
   refreshTempPassword: () => void
 }
@@ -130,6 +144,7 @@ export function useLanDesk(): UseLanDeskReturn {
   return {
     isLive, local, devices, deviceLoading, loadDevices,
     config, configLoading, configError, loadConfig, saveConfig,
+    reconnectPlan, loadReconnectPlan,
     logs, refreshTempPassword,
   }
 }

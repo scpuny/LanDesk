@@ -40,6 +40,52 @@ pub fn decide_path(inner: bool, hole: &HoleResult, relay_enabled: bool) -> PathD
     }
 }
 
+/// 双宿主共享的路径决策**视图**（REST `/api/choose-path` 出参 + Tauri `choose_path`
+/// 命令出参**同形**，P1.3 归一——见 `docs/ui-backend-matrix.md` §5.4：此前 Tauri 裸
+/// `PathDecision` 出 `{Use:{Inner}}`（PascalCase 嵌套枚举）、REST 出 `{use:{conn_mode}}`，
+/// 两宿主形状漂移，前端要写两套解析）。
+///
+/// 用**扁平结构体** + `camelCase` 对齐前端 `PathDecision`：
+/// - 有路径 → `{"connMode":"p2p"}`（`conn_mode` 小写，对齐前端 `ConnMode`）；
+/// - 无路径 → `{"nopath":true}`。
+///
+/// 两宿主都经 [`PathDecisionView::from`] 出它，字节一致；前端一套解析即可。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathDecisionView {
+    /// 选定连接方式（`inner`/`p2p`/`relay`）；无路径时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conn_mode: Option<&'static str>,
+    /// 是否无可用路径（打洞失败且中继不可用/关闭，FR-11.2）；`false` 时省略。
+    #[serde(default, skip_serializing_if = "skip_false")]
+    pub nopath: bool,
+}
+
+/// `skip_serializing_if`：`nopath` 为 `false` 时省略（保持「有路径」出参干净）。
+fn skip_false(b: &bool) -> bool {
+    !b
+}
+
+impl PathDecisionView {
+    /// 由内核决策 [`PathDecision`] 归一为共享视图（两宿主统一走这里）。
+    pub fn from(d: &PathDecision) -> Self {
+        match d {
+            PathDecision::Use(m) => PathDecisionView {
+                conn_mode: Some(match m {
+                    ConnMode::Inner => "inner",
+                    ConnMode::P2p => "p2p",
+                    ConnMode::Relay => "relay",
+                }),
+                nopath: false,
+            },
+            PathDecision::NoPath => PathDecisionView {
+                conn_mode: None,
+                nopath: true,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +114,17 @@ mod tests {
         // 打洞失败 + 用户关掉中继（FR-11.2 可关）→ 拒绝连接。
         assert_eq!(decide_path(false, &HoleResult::NoPath, false), PathDecision::NoPath);
         assert_eq!(decide_path(false, &HoleResult::NeedRelay, false), PathDecision::NoPath);
+    }
+
+    #[test]
+    fn view_serializes_flat_camel_case_for_frontend() {
+        // 双宿主共享视图：扁平 camelCase，conn_mode 小写（P1.3 归一）。
+        let v = PathDecisionView::from(&decide_path(false, &HoleResult::Direct, false));
+        let json = serde_json::to_value(v).expect("serialize");
+        assert_eq!(json, serde_json::json!({ "connMode": "p2p" }), "有路径 → connMode 小写、无 nopath 键");
+
+        let no = PathDecisionView::from(&decide_path(false, &HoleResult::NoPath, false));
+        let json = serde_json::to_value(no).expect("serialize");
+        assert_eq!(json, serde_json::json!({ "nopath": true }), "无路径 → nopath:true、无 connMode 键");
     }
 }

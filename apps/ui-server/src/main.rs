@@ -21,8 +21,8 @@ use axum::{
 };
 use clap::Parser;
 use landesk_ui::{
-    Config, ConfigStore, ConnMode, HoleResult, OnlineDevice, PathDecision, ReconnectScheduler,
-    device_rows, decide_path, view_of,
+    Config, ConfigStore, DeviceTable, HoleResult, PathDecisionView, ReconnectScheduler,
+    decide_path, schedule_of, view_of,
 };
 use mdns::Listener;
 
@@ -51,7 +51,7 @@ struct Args {
 #[derive(Clone)]
 struct Ctx {
     listener: Arc<Mutex<Option<Listener>>>,
-    devices: Arc<Mutex<Vec<OnlineDevice>>>,
+    devices: Arc<Mutex<DeviceTable>>,
     store: ConfigStore,
     static_dir: PathBuf,
 }
@@ -63,14 +63,6 @@ struct ChoosePathReq {
     inner_found: bool,
     hole: HoleResult,
     relay_enabled: bool,
-}
-
-/// `/api/choose-path` 出参。
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ChoosePathResp {
-    Use { conn_mode: &'static str },
-    NoPath,
 }
 
 /// `/api/reconnect` 入参（camelCase 对齐前端）。
@@ -86,20 +78,6 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// 路径决策结果 → REST 出参。
-fn decide_resp(decision: &PathDecision) -> ChoosePathResp {
-    match decision {
-        PathDecision::Use(m) => ChoosePathResp::Use {
-            conn_mode: match m {
-                ConnMode::Inner => "inner",
-                ConnMode::P2p => "p2p",
-                ConnMode::Relay => "relay",
-            },
-        },
-        PathDecision::NoPath => ChoosePathResp::NoPath,
-    }
 }
 
 #[tokio::main]
@@ -124,40 +102,39 @@ async fn main() {
 
     let ctx = Ctx {
         listener: Arc::new(Mutex::new(listener)),
-        devices: Arc::new(Mutex::new(Vec::new())),
+        devices: Arc::new(Mutex::new(DeviceTable::new())),
         store: ConfigStore::new(),
         static_dir: static_dir.clone(),
     };
 
-    // 后台任务：周期驱动 mDNS 事件 + 刷新在线表 + TTL 剪枝（FR-01.4）。
+    // 后台任务：周期驱动 mDNS 事件 + 把监听器在线表快照镜像进 DeviceTable + TTL 剪枝（FR-01.4）。
     {
         let ctx = ctx.clone();
         let tick = std::time::Duration::from_secs(args.discover.max(1));
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tick).await;
-                // 非阻塞取走已到达事件，刷新设备表。
-                if let Some(l) = ctx.listener.lock().unwrap().as_mut() {
-                    while l.poll_next().is_some() {}
-                }
-                let mut devs = ctx.devices.lock().unwrap();
-                let removed = mdns::prune_stale(&mut devs, now_secs());
-                if removed > 0 {
-                    tracing::debug!(removed, "mDNS 剪枝过期设备");
-                }
+                // 非阻塞取走已到达事件，再镜像监听器内部在线表进共享 DeviceTable。
+                let snap = match ctx.listener.lock().unwrap().as_mut() {
+                    Some(l) => {
+                        while l.poll_next().is_some() {}
+                        l.snapshot()
+                    }
+                    None => Vec::new(),
+                };
+                ctx.devices.lock().unwrap().apply_snapshot(snap);
             }
         });
     }
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
-        // 设备列表（FR-01.2）：当前在线表 + TTL 剪枝 + 排序行。
+        // 设备列表（FR-01.2）：共享 DeviceTable（后台任务从监听器镜像）→ TTL 剪枝 + 排序行。
         .route(
             "/api/devices",
             get(|State(ctx): State<Ctx>| async move {
                 let now = now_secs();
-                let mut devs = ctx.devices.lock().unwrap().clone();
-                Json(device_rows(&mut devs, now))
+                Json(ctx.devices.lock().unwrap().rows(now))
             }),
         )
         // 配置读（FR-08）。
@@ -193,7 +170,7 @@ async fn main() {
             "/api/choose-path",
             post(|Json(req): Json<ChoosePathReq>| async move {
                 let d = decide_path(req.inner_found, &req.hole, req.relay_enabled);
-                Json(decide_resp(&d)).into_response()
+                Json(PathDecisionView::from(&d)).into_response()
             }),
         )
         // 重连指示器（FR-05.4，接 M7 ReconnectScheduler）。
@@ -208,6 +185,13 @@ async fn main() {
                     Some(v) => Json(v).into_response(),
                     None => StatusCode::NO_CONTENT.into_response(),
                 }
+            }),
+        )
+        // 重连退避计划（P1.2「会话命令面」，FR-05.4）：完整 1/2/4/8/16s 序列 + 次数。
+        .route(
+            "/api/reconnect-schedule",
+            get(|| async move {
+                Json(schedule_of(&ReconnectScheduler::default_policy())).into_response()
             }),
         )
         // 静态托管 + SPA fallback（未匹配路径 → index.html）。
