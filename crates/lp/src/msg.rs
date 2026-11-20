@@ -169,12 +169,38 @@ impl EncoderKind {
 }
 
 /// 编码器预设（FR-08.5）。
+///
+/// serde 序列化为**整数码率档**（`0/1/2`，即 `#[repr(u8)]` 判别值）而非变体名：
+/// 与前端 `Preset = 0|1|2`（`ui/frontend/src/types/index.ts`）对齐，`Config` 的 JSON
+/// 往返 + REST/Tauri 出参才不被 `"Smooth"` 字符串坑到（见 docs/ui-backend-matrix.md §6.3）。
+/// 仅走 JSON（配置持久化 / UI 出参）；二进制 `lp` 线层从不直接编码 `EncodePreset`
+/// （`EncodeParams.preset` 是裸 `u8`），故此 serde 表示不影响 wire。
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
 pub enum EncodePreset {
     Smooth = 0,
     Balanced = 1,
     Hd = 2,
+}
+
+impl From<EncodePreset> for u8 {
+    fn from(p: EncodePreset) -> Self {
+        p as u8
+    }
+}
+
+impl TryFrom<u8> for EncodePreset {
+    /// 反序列化错误：返回无法识别的原始判别值。
+    type Error = u8;
+    fn try_from(v: u8) -> Result<Self, u8> {
+        Ok(match v {
+            0 => EncodePreset::Smooth,
+            1 => EncodePreset::Balanced,
+            2 => EncodePreset::Hd,
+            _ => return Err(v),
+        })
+    }
 }
 
 /// 运行时码率 / I 帧间隔 / 预设调整（FR-04.5）。

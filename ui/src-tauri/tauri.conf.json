@@ -15,7 +15,8 @@
         "minWidth": 720,
         "minHeight": 480
       }
-    ]
+    ],
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": false

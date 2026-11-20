@@ -33,6 +33,10 @@ pub struct Config {
     pub stun_url: Option<String>,
     /// 中继开关（FR-11.2，可关 → 打不通即拒绝）。
     pub relay_enabled: bool,
+    /// 中继 / TURN 地址（`turn://host:3479`；对齐前端 `LanDeskConfig.relay_url`，
+    /// 旧配置无此字段时 serde 对 `Option` 缺省为 `None`，向后兼容）。
+    #[serde(default)]
+    pub relay_url: Option<String>,
     /// 编码预设。
     pub preset: EncodePreset,
     /// 脏矩形开关（关则全帧模式，风险表#3）。
@@ -52,6 +56,7 @@ impl Default for Config {
             signaling_url: None,
             stun_url: None,
             relay_enabled: true,
+            relay_url: None,
             preset: EncodePreset::Balanced,
             dirty_rect: true,
             log_level: LogLevel::default(),

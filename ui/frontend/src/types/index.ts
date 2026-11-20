@@ -63,19 +63,23 @@ export interface LogLine {
   kv: string
 }
 
-/** 受控端配置（对齐 landesk-core/Config） */
+/** 受控端配置（对齐 landesk-core/Config）。
+ *  后端 `Option<String>` 字段序列化可为 `null`，故此处允许 `string | null`；
+ *  `preset` 为整数码率档 `0|1|2`（EncodePreset serde 按 u8 判别值序列化）；
+ *  `relay_url` 已对齐后端（`#[serde(default)]` `Option<String>`）。
+ *  `stun_enabled` 为前端展示态（后端 STUN 以 `stun_url` 是否置位判定，无独立开关字段）。 */
 export interface LanDeskConfig {
   device_name: string
-  password: string
+  password: string | null
   preset: Preset
   dirty_rect: boolean
   mdns_enabled: boolean
   signaling_enabled: boolean
-  signaling_url: string
+  signaling_url: string | null
   relay_enabled: boolean
-  relay_url: string
-  stun_enabled: boolean
-  stun_url: string
+  relay_url: string | null
+  stun_enabled?: boolean
+  stun_url: string | null
   log_level: 'Info' | 'Debug' | 'Warn' | 'Error'
 }
 

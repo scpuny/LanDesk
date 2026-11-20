@@ -1,12 +1,26 @@
 // LanDesk 数据层单例：浏览器预览用 mock 数据，真实宿主走 lib/landesk.ts 桥接。
 import { reactive, ref, type Ref } from 'vue'
-import { landesk } from '../lib/landesk'
+import { landesk, detectLiveHost } from '../lib/landesk'
 import type {
   DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo,
 } from '../types/index'
 
-const isLive = typeof window !== 'undefined' &&
-  (!!(window.__TAURI__?.core) || !!window.__LANDesk_live__)
+// live 判定：Tauri（withGlobalTauri 注入 __TAURI__）或显式 __LANDesk_live__===true 可同步可知；
+// 浏览器无注入时异步自检 /health（detectLiveHost）定论，避免把 mock dev 服务误判为 live。
+const liveNow = typeof window !== 'undefined' &&
+  (!!window.__TAURI__?.core?.invoke || window.__LANDesk_live__ === true)
+const isLive: Ref<boolean> = ref(liveNow)
+let liveSettled: Promise<boolean> | null = null
+function ensureLive(): Promise<boolean> {
+  if (liveNow) return Promise.resolve(true)
+  if (!liveSettled) {
+    liveSettled = detectLiveHost().then((v) => {
+      isLive.value = v
+      return v
+    })
+  }
+  return liveSettled
+}
 
 // ---- Mock 数据（对齐 V2 设计稿示例）----
 const mockDevices: DeviceRow[] = [
@@ -57,7 +71,7 @@ interface RawDevice {
 function kindOf(): DeviceKind { return 'monitor' }
 
 async function loadDevices(): Promise<void> {
-  if (!isLive) { devices.value = [...mockDevices]; return }
+  if (!(await ensureLive())) { devices.value = [...mockDevices]; return }
   deviceLoading.value = true
   try {
     const rows: RawDevice[] = await landesk.deviceList([], Math.floor(Date.now() / 1000)) || []
@@ -74,7 +88,7 @@ async function loadDevices(): Promise<void> {
 }
 
 async function loadConfig(): Promise<void> {
-  if (!isLive) { Object.assign(config, mockConfig); return }
+  if (!(await ensureLive())) { Object.assign(config, mockConfig); return }
   configLoading.value = true
   configError.value = ''
   try {
@@ -89,7 +103,7 @@ async function loadConfig(): Promise<void> {
 }
 
 async function saveConfig(): Promise<void> {
-  if (isLive) await landesk.configSave({ ...config })
+  if (await ensureLive()) await landesk.configSave({ ...config })
 }
 
 function refreshTempPassword(): void {
@@ -98,7 +112,7 @@ function refreshTempPassword(): void {
 }
 
 export interface UseLanDeskReturn {
-  isLive: boolean
+  isLive: Ref<boolean>
   local: LocalInfo
   devices: Ref<DeviceRow[]>
   deviceLoading: Ref<boolean>
