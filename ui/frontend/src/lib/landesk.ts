@@ -1,7 +1,7 @@
 // LanDesk 前端 ↔ 后端桥接封装（对齐 ui/src-tauri 的 Tauri 命令 + apps/ui-server 的 REST）。
 // 双轨降级：Tauri 宿主走 invoke；浏览器走 REST /api/*。
 // 出参为 landesk-ui 的可序列化模型（JSON 直进组件）。
-import type { ConnMode, DeviceRow, LanDeskConfig } from '../types/index'
+import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo } from '../types/index'
 
 /** ICE 打洞三态（对齐 `ice::HoleResult`，serde 默认按变体名序列化）。 */
 export type HoleResult = 'Direct' | 'NeedRelay' | 'NoPath'
@@ -142,6 +142,43 @@ export const landesk = {
       ? tauriInvoke<ReconnectSchedule>('reconnect_schedule')
       : rest<ReconnectSchedule>('/api/reconnect-schedule')
   },
+
+  /** 本机信息（P2.8「本机信息 API」，矩阵 §7.5）：设备码/临时密码/能力/在线态。
+   *  - Tauri：壳 `local_info` 命令（设备表驱动 mDNS/在线态，设备码 FNV 派生）。
+   *  - REST：`/api/local-info`。 */
+  localInfo(): Promise<LocalInfo> {
+    return isTauri()
+      ? tauriInvoke<LocalInfo>('local_info')
+      : rest<LocalInfo>('/api/local-info')
+  },
+
+  /** 日志查询（P2.8「日志查询 API」，矩阵 §7.5）：环形缓冲 + 级别/关键字过滤。
+   * `level`/`keyword` 可空（`ALL`/空 = 不限）。后端出参 `t` 为 epoch 微秒。 */
+  logQuery(level?: string, keyword?: string): Promise<RawLogLine[]> {
+    const q = new URLSearchParams()
+    if (level) q.set('level', level)
+    if (keyword) q.set('q', keyword)
+    const qs = q.toString()
+    return isTauri()
+      ? tauriInvoke<RawLogLine[]>('log_query', { level: level ?? null, keyword: keyword ?? null })
+      : rest<RawLogLine[]>(`/api/logs${qs ? `?${qs}` : ''}`)
+  },
+
+  /** 日志清空（P2.8「日志清空 API」，矩阵 §7.5）。 */
+  logClear(): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('log_clear')
+      : rest<void>('/api/logs/clear', { method: 'POST' })
+  },
+}
+
+/** 后端 `ui::LogLine` 序列化形状（`t` 为 epoch 微秒 `number`，`mod` 键名；camelCase）。 */
+export interface RawLogLine {
+  t: number
+  level: string
+  mod: string
+  msg: string
+  kv: string
 }
 
 export type { DeviceRow }

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // 日志页：深色终端风格 + 级别筛选 + 关键字过滤，对齐 V2 设计稿。
-import { ref, computed } from 'vue'
+// P2.8：live 宿主走后端 logQuery/logClear（环形缓冲），非 live 保留 mock 预览 + 客户端过滤。
+import { ref, computed, onMounted, watch } from 'vue'
 import { toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
 import type { LogFilter } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
-const { logs } = useLanDesk()
+const { isLive, logs, loadLogs, clearLogs } = useLanDesk()
 const level = ref<LogFilter>('ALL')
 const keyword = ref('')
 const autoScroll = ref(true)
@@ -25,8 +26,14 @@ const filtered = computed(() => {
     (level.value === 'ALL' || l.level === level.value) &&
     (!q || `${l.mod} ${l.msg} ${l.kv}`.toLowerCase().includes(q)))
 })
-function clear() { logs.value = []; toast('日志已清空', 'info') }
+// 清空：live 调后端 logClear（环形缓冲归零）并同步本地；非 live 仅清本地。
+async function clear() { await clearLogs(); toast('日志已清空', 'info') }
 function exportLog() { toast('已导出 landsdk.log', 'success') }
+
+// 拉取日志：live 走后端环形缓冲，非 live 保留 mock。
+onMounted(() => { loadLogs(level.value, keyword.value || undefined) })
+// live 下筛选变化 → 重新查询后端（客户端 filtered 仍即时作用于已拉快照，双重一致）。
+watch([level, keyword], () => { if (isLive.value) loadLogs(level.value, keyword.value || undefined) })
 </script>
 
 <template>
