@@ -369,8 +369,13 @@ dependencies = [
 name = "controlled"
 version = "0.1.0"
 dependencies = [
+ "avcodec-wrap",
+ "capture",
  "clap",
  "landesk-core",
+ "lp",
+ "mdns",
+ "quic-link",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2012,6 +2017,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
+ "futures-util",
  "landesk-core",
  "landesk-ui",
  "mdns",
