@@ -51,6 +51,16 @@ jobs:
     name: build & package (macos)
     runs-on: macos-latest
     steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
@@ -125,6 +135,16 @@ jobs:
     name: build & package (windows-x86_64)
     runs-on: windows-latest
     steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
@@ -182,6 +202,16 @@ jobs:
     name: build & package (linux-x86_64)
     runs-on: ubuntu-latest
     steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
@@ -242,6 +272,16 @@ jobs:
     name: build & package (linux-aarch64)
     runs-on: ubuntu-latest
     steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # GitHub Actions Windows runner 默认 git autocrlf=true，会把嵌套 crate 自带的
+        # `* text=auto`（strsim/simd_cesu8/untrusted/typenum/unicode-ident 的 .gitattributes）
+        # 在 clone 时把 vendor 文本文件转 CRLF → 工作区字节 ≠ .cargo-checksum.json 记录的
+        # LF sha256 → `cargo build --locked` 报 "listed checksum has changed" exit 101。
+        # 根仓 `.gitattributes` 的 `vendor/** -text` 被更近层的嵌套 .gitattributes 覆盖、
+        # 无法根治，且那 5 个嵌套文件本身被 checksum 跟踪不能改 → 只能在 clone 前全局
+        # 关 autocrlf（Linux/mac runner 本就以 false 运行，零副作用）。
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
