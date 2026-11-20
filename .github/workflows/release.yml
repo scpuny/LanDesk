@@ -579,30 +579,47 @@ jobs:
   # main = 稳定发布分支，永远代表最近一个已发布版本；dev = 开发主干。
   # 仅 tag 推送触发（v*），workflow_dispatch 不同步；幂等，已包含则跳过。
   # ------------------------------------------------------------------
-  sync-main:
-    name: sync release tag into main (stable line)
+  finalize-release:
+    name: finalize release（合入 main + 删除 pre-release）
     runs-on: ubuntu-latest
     needs: [release]
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
+    # release 成功（或单平台 best-effort 缺资产但未被取消）后才收尾
+    if: ${{ !cancelled() && needs.release.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0 # 取全历史，才能 merge tag 并 fast-forward 判定
+          fetch-depth: 0 # 取全历史 + 全 tag，才能 merge 与幂等判定
 
+      # 发布流程（标准 Git Flow + release branch）：
+      #   dev →[切 pre-release]→ CI 过 →[从 pre-release 打 v* tag]→ Release
+      #        →[本 job] 合 tag 进 main + 删除 pre-release。
+      # main 只接受来自 release tag 的合并；dev 不直接进 main。
       - name: Merge ${{ github.ref_name }} into main & push
         shell: bash
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # checkout(fetch-depth:0) 默认已取全部 tag；显式 fetch 兜底，幂等无副作用
           git fetch origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
           if git merge-base --is-ancestor "${GITHUB_REF_NAME}" HEAD; then
-            echo "::notice::${GITHUB_REF_NAME} 已在 main 中，跳过"
-            exit 0
+            echo "::notice::${GITHUB_REF_NAME} 已在 main 中，跳过合并"
+          else
+            git merge --no-ff "${GITHUB_REF_NAME}" \
+              -m "release: merge ${GITHUB_REF_NAME} into main"
+            git push origin main
+            echo "::notice::main 已同步到 ${GITHUB_REF_NAME}"
           fi
-          git merge --no-ff "${GITHUB_REF_NAME}" \
-            -m "release: merge ${GITHUB_REF_NAME} into main (stable line)"
-          git push origin main
-          echo "::notice::main 已同步到 ${GITHUB_REF_NAME}"
+
+      # 发布完成，删除临时发布分支；用 --delete 远程删除，本地 checkout 的是 main 故无本地分支问题。
+      # 分支不存在时静默跳过（兼容直接从 dev 打 tag 的历史做法 / 重复运行）。
+      - name: Delete pre-release branch
+        shell: bash
+        run: |
+          set -uo pipefail
+          if git ls-remote --exit-code --heads origin pre-release >/dev/null 2>&1; then
+            git push origin --delete pre-release
+            echo "::notice::pre-release 分支已删除"
+          else
+            echo "::notice::pre-release 分支不存在，跳过删除"
+          fi
