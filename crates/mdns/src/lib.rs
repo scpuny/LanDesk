@@ -47,7 +47,7 @@ pub struct DeviceAd {
 impl DeviceAd {
     /// 实例名 = `设备名@id后6位`（避免重名冲突，对齐 protocol.md §4）。
     pub fn instance_name(&self) -> String {
-        format!("{}@{}", self.name, &self.id.get(..6).unwrap_or(&self.id))
+        format!("{}@{}", self.name, self.id.get(..6).unwrap_or(&self.id))
     }
 }
 
