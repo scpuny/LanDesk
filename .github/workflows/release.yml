@@ -129,8 +129,14 @@ jobs:
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
           BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          # 两个 config 必须一起移走：壳 config 用自己的 vendor（无 tauri），
+          # 根 config 把 crates.io 替换成主仓 vendor（也无 tauri）。都摘掉后
+          # cargo 才真正走在线 crates.io 拉 tauri 全家桶。CI runner 无本机 LSM 限制。
           mv "${CFG}" "${BAK}" 2>/dev/null || true
-          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
           for t in x86_64-apple-darwin aarch64-apple-darwin; do
             arch="${t%%-*}"
@@ -237,8 +243,14 @@ jobs:
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
           BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          # 两个 config 必须一起移走：壳 config 用自己的 vendor（无 tauri），
+          # 根 config 把 crates.io 替换成主仓 vendor（也无 tauri）。都摘掉后
+          # cargo 才真正走在线 crates.io 拉 tauri 全家桶。CI runner 无本机 LSM 限制。
           mv "${CFG}" "${BAK}" 2>/dev/null || true
-          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
           ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
             || echo "GUI build failed, skipping"
@@ -338,8 +350,14 @@ jobs:
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
           BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          # 两个 config 必须一起移走：壳 config 用自己的 vendor（无 tauri），
+          # 根 config 把 crates.io 替换成主仓 vendor（也无 tauri）。都摘掉后
+          # cargo 才真正走在线 crates.io 拉 tauri 全家桶。CI runner 无本机 LSM 限制。
           mv "${CFG}" "${BAK}" 2>/dev/null || true
-          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
           ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
             || echo "GUI build failed, skipping"
@@ -520,11 +538,15 @@ jobs:
             ls -1 release-assets/ | grep -v '^SHA256SUMS.txt$' || echo "（无——各构建 job 需查日志）"
             echo '```'
             echo ""
-            echo "## GUI 安装包（headline）"
-            echo "- macOS：\`landesk-${ver}-gui-macos-{x86_64,arm64}.dmg\`（+ 对应 .app zip）—未公证，首运右键-打开"
-            echo "- Windows x64：\`landesk-${ver}-gui-windows-x86_64-setup.exe\`（NSIS，未签名）"
-            echo "- Linux amd64：\`landesk-${ver}-gui-linux-x86_64.deb\` + \`landesk-${ver}-gui-linux-x86_64.rpm\`（依赖 libwebkit2gtk-4.1 / gtk3）"
-            echo "- 缺某平台：该 GUI 步 best-effort 失败，见对应 job 日志；CLI zip 仍可用。"
+            echo "## GUI 安装包（headline，实际产出）"
+            # 只列实际生成的文件，避免写死文案误导（曾有 GUI 全失败却仍写"已产出"的情况）
+            gui=$(cd release-assets && ls -1 2>/dev/null | grep -E 'gui.*\.(dmg|deb|rpm|exe|zip)$' || true)
+            if [[ -n "${gui}" ]]; then
+              echo "${gui}" | sed 's/^/- /'
+            else
+              echo "- 本次无 GUI 安装包产出（GUI job best-effort 失败，见对应 job 日志）。"
+            fi
+            echo "- 未公证/未签名：macOS 首运右键-打开，Windows SmartScreen「仍要运行」。"
             echo ""
             echo "## 无头 CLI / 服务端（五架构 backbone）"
             echo "- \`landesk-${ver}-macos-{x86_64,arm64}.zip\` / \`landesk-${ver}-windows-x86_64.zip\`"
