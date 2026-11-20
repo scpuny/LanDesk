@@ -25,12 +25,10 @@ version = "0.2.0"
 edition = "2021"
 authors = ["LanDesk Team"]
 license = "MIT"
-repository = "https://github.com/scpuny/LanDesk"
 
 [workspace.dependencies]
 # 异步
 tokio = { version = "1", features = ["full"] }
-futures = "0.3"
 # 最小化：与 tokio-tungstenite 一致（sink+std，避免拉 futures-macro/futures-channel 等非 vendor 项）。
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # 协议 / 序列化
@@ -48,19 +46,15 @@ pbkdf2 = "0.12"
 rand = "0.8"
 # QUIC
 quinn = "0.11"
-quinn-proto = "0.11"
 # 网络 / 信令
 tokio-tungstenite = "0.24"
 axum = { version = "0.7", features = ["ws"] }
 mdns-sd = "0.10"
-# mDNS 事件通道（mdns-sd 的 receiver 类型）
-flume = "0.11"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # 错误
 thiserror = "1"
-anyhow = "1"
 # CLI
 clap = { version = "4", features = ["derive"] }
 # 证书（QUIC TLS 自签，M3 环路测试用）
