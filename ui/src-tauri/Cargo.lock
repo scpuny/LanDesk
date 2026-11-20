@@ -2041,7 +2041,7 @@ dependencies = [
 name = "landesk-app"
 version = "0.2.0"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "landesk-ui",
  "serde",
  "tauri",

@@ -11,7 +11,7 @@
 #   1) GUI 安装包（Tauri，headline 资产，best-effort 不阻塞）：
 #      - macos arm64：`tauri build` → `LanDesk_*.dmg` + `LanDesk.app`（zip）
 #      - windows    ：`tauri build` → `LanDesk_*_setup.exe`（NSIS 安装包）
-#      - linux amd64：`tauri build` → `landesk_*.deb`
+#      - linux amd64：`tauri build` → `landesk_*.deb` + `*.rpm`
 #      未签名/未公证：首运 macOS 右键-打开、Windows SmartScreen「仍要运行」。
 #   2) 无头 CLI/服务端二进制（backbone，五架构全出）：controlled / controller /
 #      relay-server / signaling-server → zip。主仓 vendor/ 已入库 → `--locked` 全离线确定性。
@@ -74,6 +74,11 @@ jobs:
         run: |
           set -uo pipefail
           git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -179,6 +184,11 @@ jobs:
         run: |
           set -uo pipefail
           git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -267,6 +277,11 @@ jobs:
         run: |
           set -uo pipefail
           git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -292,15 +307,15 @@ jobs:
           ( cd dist/linux && zip -qr "landesk-${ver}-linux-x86_64.zip" cli )
           ls -1 dist/linux/*.zip
 
-      - name: GUI installer (.deb, best-effort)
-        # Tauri v2 on ubuntu-latest：webkit2gtk-4.1 等系统库 + dpkg-deb；缺则跳过。
+      - name: GUI installer (.deb + .rpm, best-effort)
+        # Tauri v2 on ubuntu-latest：webkit2gtk-4.1 等系统库 + dpkg-deb + rpmbuild；缺则跳过。
         continue-on-error: true
         run: |
           set -u
           ver="${GITHUB_REF_NAME#v}"
           sudo apt-get update -qq && sudo apt-get install -y -qq \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libssl-dev libxdo-dev pkg-config file libfuse2 \
+            librsvg2-dev libssl-dev libxdo-dev pkg-config file libfuse2 rpm \
             || echo "apt install failed, GUI likely skipped"
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
@@ -310,14 +325,20 @@ jobs:
           ( cd ui/frontend && npm ci && npm run build )
           ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
             || echo "GUI build failed, skipping"
-          B="ui/src-tauri/target/release/bundle/deb"
-          if [[ -d "$B" ]]; then
-            mkdir -p dist/linux/gui
-            find "$B" -maxdepth 1 -name '*.deb' 2>/dev/null | while read -r d; do
+          mkdir -p dist/linux/gui
+          BD="ui/src-tauri/target/release/bundle/deb"
+          if [[ -d "$BD" ]]; then
+            find "$BD" -maxdepth 1 -name '*.deb' 2>/dev/null | while read -r d; do
               cp -f "$d" "dist/linux/gui/landesk-${ver}-gui-linux-x86_64.deb"
             done
-            echo "GUI deb: $(ls -1 dist/linux/gui 2>/dev/null | tr '\n' ' ')"
           fi
+          BR="ui/src-tauri/target/release/bundle/rpm"
+          if [[ -d "$BR" ]]; then
+            find "$BR" -maxdepth 1 -name '*.rpm' 2>/dev/null | while read -r r; do
+              cp -f "$r" "dist/linux/gui/landesk-${ver}-gui-linux-x86_64.rpm"
+            done
+          fi
+          echo "GUI deb/rpm: $(ls -1 dist/linux/gui 2>/dev/null | tr '\n' ' ')"
 
       - name: Upload artifacts
         if: always()
@@ -358,6 +379,11 @@ jobs:
         run: |
           set -uo pipefail
           git config core.autocrlf false
+          # ★ core.eol=lf 必须显式设：Windows 上 core.eol 默认 crlf，
+          #   嵌套 .gitattributes 的 `* text=auto`（strsim/simd_cesu8/untrusted）
+          #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
+          #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
+          git config core.eol lf
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -437,7 +463,7 @@ jobs:
           # 收集所有产物：CLI zip + 各平台安装包（dmg / deb / exe / app zip）
           # download-artifact 展平到 dist/<artifact-name>/...；递归取全部目标扩展
           find dist -type f \( -name 'landesk-*.zip' \
-                                 -name '*.dmg' -name '*.deb' \
+                                 -name '*.dmg' -name '*.deb' -name '*.rpm' \
                                  -name '*-setup.exe' -name '*-app.zip' \) \
                -exec cp -f {} release-assets/ \; 2>/dev/null || true
           # 归一化命名兜底：若某 GUI 步没来得及归一（原始 tauri 名），补成 landesk-* 前缀。
@@ -447,6 +473,7 @@ jobs:
               case "$f" in
                 *.dmg)  mv -f "$f" "landesk-${ver}-gui-macos.dmg" ;;
                 *.deb)  mv -f "$f" "landesk-${ver}-gui-linux-x86_64.deb" ;;
+                *.rpm)  mv -f "$f" "landesk-${ver}-gui-linux-x86_64.rpm" ;;
                 *.exe)  mv -f "$f" "landesk-${ver}-gui-windows-x86_64-setup.exe" ;;
               esac
             done )
@@ -471,7 +498,7 @@ jobs:
             echo "## GUI 安装包（headline）"
             echo "- macOS：\`landesk-${ver}-gui-macos-{x86_64,arm64}.dmg\`（+ 对应 .app zip）—未公证，首运右键-打开"
             echo "- Windows x64：\`landesk-${ver}-gui-windows-x86_64-setup.exe\`（NSIS，未签名）"
-            echo "- Linux amd64：\`landesk-${ver}-gui-linux-x86_64.deb\`（依赖 libwebkit2gtk-4.1 / gtk3）"
+            echo "- Linux amd64：\`landesk-${ver}-gui-linux-x86_64.deb\` + \`landesk-${ver}-gui-linux-x86_64.rpm\`（依赖 libwebkit2gtk-4.1 / gtk3）"
             echo "- 缺某平台：该 GUI 步 best-effort 失败，见对应 job 日志；CLI zip 仍可用。"
             echo ""
             echo "## 无头 CLI / 服务端（五架构 backbone）"
