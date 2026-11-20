@@ -2,9 +2,9 @@
   <defs>
     <!-- 主渐变：纯垂直，上浅下深，明度差约 6%，不仔细分辨看不出来 -->
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#5594F8"/>
-      <stop offset="0.5" stop-color="#4988F3"/>
-      <stop offset="1" stop-color="#3C7CEC"/>
+      <stop offset="0" stop-color="#2E60CC"/>
+      <stop offset="0.5" stop-color="#2655BC"/>
+      <stop offset="1" stop-color="#1F4AAC"/>
     </linearGradient>
     <!-- 极轻暗角：只收四角，增加轮廓立体感 -->
     <radialGradient id="vignette" cx="0.5" cy="0.42" r="0.72">
@@ -19,6 +19,10 @@
     <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
       <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0A2A66" flood-opacity="0.38"/>
     </filter>
+    <!-- 显示器/摄像机共用投影：轻微立体感 -->
+    <filter id="displayShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#000000" flood-opacity="0.30"/>
+    </filter>
   </defs>
 
   <!-- 四周留白：内容缩放至画布中央，透明边距约 8.6%，避免 macOS 程序坞中被撑满 -->
@@ -26,11 +30,9 @@
     <!-- 圆角方形底：微妙垂直蓝色梯度 + 极轻暗角 -->
     <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#bg)"/>
     <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#vignette)"/>
-    <!-- 边缘高光：极细描边勾勒轮廓质感，不往画面叠白光 -->
-    <rect x="8" y="8" width="1008" height="1008" rx="218" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="5"/>
 
-    <!-- 显示器：实心白框 + 内凹深蓝屏，带柔和投影 -->
-    <g filter="url(#softShadow)">
+    <!-- 显示器：实心白框 + 内凹深蓝屏，带轻微投影 -->
+    <g filter="url(#displayShadow)">
       <rect x="178" y="248" width="668" height="452" rx="60" fill="#FFFFFF"/>
       <rect x="222" y="292" width="580" height="364" rx="34" fill="url(#screen)"/>
       <path d="M512 700 v74" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round"/>
@@ -38,7 +40,7 @@
     </g>
 
     <!-- 屏幕中央：摄像机（机身 + 镜头 + 侧凸起），经典造型识别度更高 -->
-    <g filter="url(#softShadow)">
+    <g filter="url(#displayShadow)">
       <!-- 机身 -->
       <rect x="378" y="396" width="216" height="152" rx="40" fill="#FFFFFF"/>
       <!-- 镜头：深蓝外环 + 深蓝瞳孔 -->
