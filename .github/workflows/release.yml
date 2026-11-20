@@ -68,8 +68,9 @@ jobs:
         # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
         # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
         # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
-        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
-        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
         shell: bash
         run: |
           set -uo pipefail
@@ -79,6 +80,11 @@ jobs:
           #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
           #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
           git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -178,8 +184,9 @@ jobs:
         # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
         # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
         # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
-        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
-        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
         shell: bash
         run: |
           set -uo pipefail
@@ -189,6 +196,11 @@ jobs:
           #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
           #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
           git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -271,8 +283,9 @@ jobs:
         # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
         # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
         # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
-        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
-        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
         shell: bash
         run: |
           set -uo pipefail
@@ -282,6 +295,11 @@ jobs:
           #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
           #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
           git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
@@ -373,8 +391,9 @@ jobs:
         # 转成 CRLF，都用 **仓库本地** `core.autocrlf false`（.git/config，覆盖 runner 全局预设）
         # + `git checkout -f HEAD -- vendor/` 从 git 对象库（blob 恒为 LF）重新物化整个 vendor 工作区：
         # autocrlf=false 时 text=auto 不做 CRLF smudge → 落盘原始 LF 字节，保证 == .cargo-checksum.json
-        # 记录的 sha256。★ 不用 `git archive|tar`（Git-for-Windows 的 tar 不重写已存在的 CRLF 文件，
-        # 实测 self-heal 无效）；git 自身 checkout -f 才可靠。探针哈希用 python3（macOS 无 sha256sum）。
+        # 记录的 sha256。★ 关键两步：先 `rm -rf vendor/` 删工作区（否则 checkout -f 因 stat 缓存
+        # 跳过重写），再 `git checkout -f HEAD -- vendor/` 从 blob 强制物化为 LF。不用 `git archive|tar`
+        # （Git-for-Windows 的 tar 不重写已存在 CRLF 文件，实测无效）。探针哈希用 python3。
         shell: bash
         run: |
           set -uo pipefail
@@ -384,6 +403,11 @@ jobs:
           #   会让 checkout 把 LF blob smudge 成 CRLF，即使 autocrlf=false 也一样，
           #   → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → checksum 失败 exit 101。
           git config core.eol lf
+          # ★ 必须先删工作区文件再 checkout：git checkout -f 对「index stat 与工作区一致」
+          #   的文件会跳过重写（Windows 上 checkout@v4 已落 CRLF 且 stat 匹配）→ 改 core.eol
+          #   也没用。rm 掉后 git 无任何 stat 可复用，强制从 blob 重新物化为 LF。
+          rm -rf vendor/ \
+            || { echo "vendor/ rm failed" >&2; exit 1; }
           git checkout -f HEAD -- vendor/ \
             || { echo "vendor/ re-checkout failed" >&2; exit 1; }
           probe="vendor/strsim-0.11.1/tests/lib.rs"
