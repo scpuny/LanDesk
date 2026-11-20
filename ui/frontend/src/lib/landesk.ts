@@ -311,6 +311,28 @@ export const landesk = {
       ? tauriInvoke<void>('window_close')
       : Promise.resolve()
   },
+
+  /** 会话窗截图：`dataUrl` = `canvas.toDataURL('image/png')` 产出的 data-URL。
+   *  - Tauri 轨：`screenshot_save` 后端解码写 `~/Pictures/landesk/screenshots/*.png`，出落盘路径（空串=失败）。
+   *  - 浏览器轨（无 OS 落盘）：走 `<a download>` 下载 PNG（不落盘，仅触发浏览器下载），恒 `true` 表「已保存/已下载」。
+   *  出 `boolean`（成功/失败），供前端 toast。 */
+  screenshotSave(dataUrl: string): Promise<boolean> {
+    if (isTauri()) {
+      return tauriInvoke<string>('screenshot_save', { dataUrl }).then((p) => p.length > 0)
+    }
+    // 浏览器轨：触发下载（`download` 属性）；不支持的宿主安全回 false。
+    try {
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = `landesk-${Date.now()}.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      return Promise.resolve(true)
+    } catch {
+      return Promise.resolve(false)
+    }
+  },
 }
 
 /** 浏览器宿主（非 Tauri）平台启发式：`navigator.platform` / `userAgent` 判 macOS/Windows/Linux。

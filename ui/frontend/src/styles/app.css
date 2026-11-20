@@ -368,6 +368,21 @@
   color: var(--ll-session-text-dim); font-size: var(--ll-fs-sm); cursor: pointer;
 }
 .ld-sess-tool:hover { background: var(--ll-session-chrome-strong); color: var(--ll-session-text); }
+/* 「更多」下拉菜单（#73）：相对顶栏按钮定位，向下展开。色值走会话 chrome token。 */
+.ld-sess-more { position: relative; }
+.ld-sess-more__menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+  min-width: 150px; padding: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--ll-session-chrome); border: 1px solid var(--ll-session-chrome-strong);
+  border-radius: var(--ll-radius-md); box-shadow: 0 6px 20px rgba(0,0,0,.28);
+}
+.ld-sess-more__menu button {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border: none; border-radius: var(--ll-radius-xs); background: transparent;
+  color: var(--ll-session-text); font-size: var(--ll-fs-sm); cursor: pointer; text-align: left;
+}
+.ld-sess-more__menu button:hover { background: var(--ll-session-chrome-strong); }
 .ld-sess-canvas {
   position: relative; flex: 1; min-height: 0; background: var(--ll-session-canvas);
   display: flex; align-items: center; justify-content: center; overflow: hidden;
