@@ -1,27 +1,31 @@
-# LanDesk Release（v0.2.0 起：五架构矩阵 + Tauri GUI 壳 best-effort + SHA256 资产）
+# LanDesk Release（v0.2.0+：五架构矩阵 + 真 Tauri 安装包 + SHA256）
 #
 # 目标架构（用户指定 5 个）：
-#   - macOS x86_64（intel）   ← macos job 交叉 target
-#   - macOS arm64（arch）     ← macos job 宿主 target
-#   - Linux amd64 (x86_64)   ← linux job 宿主构建
-#   - Linux arm (aarch64)     ← linux-aarch64 job（gcc-aarch64-linux-gnu 宿主交叉，
-#                                主仓 .cargo/config.toml 已指定 linker=aarch64-linux-gnu-gcc）
-#   - Windows x86_64         ← windows job 宿主构建
+#   - macOS x86_64（intel）   ← macos job CLI 交叉 target
+#   - macOS arm64（arch）     ← macos job 宿主 target（+ GUI .dmg/.app 原生）
+#   - Linux amd64 (x86_64)   ← linux job 宿主构建（+ GUI .deb）
+#   - Linux arm (aarch64)    ← linux-aarch64 job 宿主交叉（gcc-aarch64-linux-gnu + ring CC）
+#   - Windows x86_64         ← windows job 宿主构建（+ GUI NSIS .exe 安装包）
 #
 # 产物分两层：
-#   1) **CLI 二进制（必出）**：controlled / controller / relay-server / signaling-server
-#      —— 主仓 vendor/ 已入库 → `--locked` 全离线确定性构建，五架构全出。
-#   2) **GUI 壳（Tauri，best-effort，失败不阻塞 release）**：
-#      - macos：x86_64 + arm64 双 target 编 `landesk-app`（前端 dist 经 generate_context!
-#        内嵌进二进制，单文件即 GUI 应用）→ `lipo` 合 universal → gui-macos-universal.zip
-#      - windows / linux amd64：宿主直编 → gui-*-x86_64.zip（未签名/未公证）
-#      - linux aarch64：GUI 壳跨 target 需整套 aarch64 系统库（webkit2gtk 等），暂不出（CLI 兜底）。
-#      壳 vendor/（770M）未入库 → CI 上临时摘掉壳 `.cargo/config.toml`（crates-io 替换目录源）
-#      改走 crates.io 在线拉取（锁文件已入库，`--locked` 保确定性）；步骤内无条件还原配置。
+#   1) GUI 安装包（Tauri，headline 资产，best-effort 不阻塞）：
+#      - macos arm64：`tauri build` → `LanDesk_*.dmg` + `LanDesk.app`（zip）
+#      - windows    ：`tauri build` → `LanDesk_*_setup.exe`（NSIS 安装包）
+#      - linux amd64：`tauri build` → `landesk_*.deb`
+#      未签名/未公证：首运 macOS 右键-打开、Windows SmartScreen「仍要运行」。
+#   2) 无头 CLI/服务端二进制（backbone，五架构全出）：controlled / controller /
+#      relay-server / signaling-server → zip。主仓 vendor/ 已入库 → `--locked` 全离线确定性。
+#
+# 流程健壮性（修 v0.2.0 release #3 的 FAILED）：
+#   - aarch64 交叉：设 CC_aarch64_unknown_linux_gnu 让 ring（cc C 构建）交叉成功；
+#     该 job 构建步 `continue-on-error`，失败不红整体 run（有产物则出 aarch64 zip）。
+#   - 所有 GUI/跨架构步 `continue-on-error`；upload `if: always()` + `if-no-files-found: warn`。
+#   - release 聚合 job `if: ${{ !cancelled() }}`，`files: release-assets/*`（恒含 SHA256SUMS.txt，
+#     空 zip 也不会 glob 崩溃）。单平台失败只缺资产，不整 run 红。
 #
 # 触发：
-#   - 推 `v*` tag（如 v0.2.0）→ 自动五架构打包并发 GitHub Release；
-#   - 手动 `workflow_dispatch`：同上（无 tag 时 ref_name=分支名，资产名用分支名兜底）。
+#   - 推 `v*` tag（如 v0.2.0）→ 自动打包并发 GitHub Release；
+#   - 手动 `workflow_dispatch`：无 tag 时 ref_name=分支名，资产名用分支名兜底。
 
 name: Release
 
@@ -34,14 +38,14 @@ on:
 permissions:
   contents: write # 创建 GitHub Release + 上传资产
 
-# 单平台失败不取消整个流程；release 聚合 job 容忍缺失资产（缺的在 notes 里标注）
+# 同 ref 重推 tag 串行（不取消在跑的）；release 聚合容忍缺失资产
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   # ------------------------------------------------------------------
-  # macOS（arm64 runner）：CLI x86_64 + arm64；GUI universal（lipo 双 slice）
+  # macOS（arm64 runner）：CLI x86_64 + arm64；GUI arm64 原生 .dmg/.app（best-effort）
   # ------------------------------------------------------------------
   macos:
     name: build & package (macos)
@@ -72,44 +76,50 @@ jobs:
           done
           ls -1 "dist/macos"/*.zip
 
-      - name: GUI shell (universal, best-effort)
-        # 壳 vendor/ 未入库：摘掉壳离线配置 → 在线拉 crates.io（--locked 保证确定性）。
-        # GUI 失败不影响 CLI 资产；配置在脚本内无条件还原。
+      - name: GUI installer (.dmg/.app, x86_64 + arm64, best-effort)
+        # 壳 vendor/ 未入库：摘掉壳离线配置 → 在线拉 crates.io（shell Cargo.lock 已入库保确定性）。
+        # tauri build 用 @tauri-apps/cli 预编译二进制（快，免 cargo install）。
+        # 双 arch 各出 .dmg + .app；失败不影响 CLI 资产；配置用绝对路径 trap 无条件还原。
         continue-on-error: true
         run: |
           set -u
           ver="${GITHUB_REF_NAME#v}"
-          mv ui/src-tauri/.cargo/config.toml ui/src-tauri/.cargo/config.toml.bak || true
-          cd ui/frontend && npm ci && npm run build && cd ../..
-          ( cd ui/src-tauri && cargo build --features tauri --release --locked \
-              --target x86_64-apple-darwin \
-            && cargo build --features tauri --release --locked \
-              --target aarch64-apple-darwin ) || echo "GUI build failed, skipping"
-          mv ui/src-tauri/.cargo/config.toml.bak ui/src-tauri/.cargo/config.toml || true
-          X="ui/src-tauri/target/x86_64-apple-darwin/release/landesk-app"
-          A="ui/src-tauri/target/aarch64-apple-darwin/release/landesk-app"
-          if [[ -f "${X}" && -f "${A}" ]]; then
-            mkdir -p dist/macos/gui
-            lipo -create -output "dist/macos/gui/landesk-app" "${X}" "${A}"
-            printf 'LanDesk GUI (Tauri) macOS universal (x86_64 + arm64)\n' \
-             'Run: ./landesk-app（未签名/未公证，首次运行需右键-打开 或 xattr -d com.apple.quarantine）。\n' \
-             '前端界面已内嵌进二进制，单文件即完整 GUI。\n' > dist/macos/gui/README.txt
-            ( cd dist/macos && zip -qr "landesk-${ver}-gui-macos-universal.zip" gui )
-            echo "GUI universal ready"
-          else
-            echo "GUI slices missing, no gui zip"
-          fi
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          for t in x86_64-apple-darwin aarch64-apple-darwin; do
+            arch="${t%%-*}"
+            echo "== GUI dmg/app ${arch}"
+            ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build \
+                --features tauri --target "${t}" ) \
+              || { echo "GUI build ${arch} failed, skipping"; continue; }
+            B="ui/src-tauri/target/${t}/release/bundle"
+            mkdir -p "${WS}/dist/macos/gui"
+            find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
+              cp -f "$d" "${WS}/dist/macos/gui/landesk-${ver}-gui-macos-${arch}.dmg"
+            done
+            APP=$(find "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)
+            if [[ -n "${APP:-}" ]]; then
+              APPDIR="$(cd "$(dirname "$APP")" && pwd)"
+              ( cd "${APPDIR}" && zip -qr "landesk-${ver}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
+              mv -f "${APPDIR}/landesk-${ver}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
+            fi
+          done
+          echo "GUI dmg/app: $(ls -1 "${WS}/dist/macos/gui" 2>/dev/null | tr '\n' ' ')"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dist-macos
-          path: dist/macos/*.zip
+          path: dist/
           if-no-files-found: warn
 
   # ------------------------------------------------------------------
-  # Windows x86_64：CLI + GUI（.exe，未签名）
+  # Windows x86_64：CLI + GUI NSIS 安装包（.exe，未签名）
   # ------------------------------------------------------------------
   windows:
     name: build & package (windows-x86_64)
@@ -133,27 +143,28 @@ jobs:
           ( cd dist/windows && tar -a -c -f "landesk-${ver}-windows-x86_64.zip" cli )
           ls -1 dist/windows/*.zip
 
-      - name: GUI shell (x86_64, best-effort)
-        # WebView2 由用户机自带/在线下载；产物未签名。
+      - name: GUI installer (NSIS .exe, best-effort)
+        # WebView2 运行时由用户机自带/在线下载；产物未签名。
         continue-on-error: true
         shell: bash
         run: |
           set -u
           ver="${GITHUB_REF_NAME#v}"
-          mv ui/src-tauri/.cargo/config.toml ui/src-tauri/.cargo/config.toml.bak || true
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
-          ( cd ui/src-tauri && cargo build --features tauri --release --locked ) \
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
             || echo "GUI build failed, skipping"
-          mv ui/src-tauri/.cargo/config.toml.bak ui/src-tauri/.cargo/config.toml || true
-          if [[ -f ui/src-tauri/target/release/landesk-app.exe ]]; then
+          B="ui/src-tauri/target/release/bundle/nsis"
+          if [[ -d "$B" ]]; then
             mkdir -p dist/windows/gui
-            cp ui/src-tauri/target/release/landesk-app.exe dist/windows/gui/
-            printf 'LanDesk GUI (Tauri) Windows x86_64\nRun landesk-app.exe（需 Windows 10+；未签名）。\n' \
-              > dist/windows/gui/README.txt
-            ( cd dist/windows && tar -a -c -f "landesk-${ver}-gui-windows-x86_64.zip" gui )
-            echo "GUI exe ready"
-          else
-            echo "GUI binary missing, no gui zip"
+            find "$B" -maxdepth 1 -name '*.exe' 2>/dev/null | while read -r e; do
+              cp -f "$e" "dist/windows/gui/landesk-${ver}-gui-windows-x86_64-setup.exe"
+            done
+            echo "GUI NSIS: $(ls -1 dist/windows/gui 2>/dev/null | tr '\n' ' ')"
           fi
 
       - name: Upload artifacts
@@ -161,11 +172,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist-windows
-          path: dist/windows/*.zip
+          path: dist/
           if-no-files-found: warn
 
   # ------------------------------------------------------------------
-  # Linux x86_64：CLI + GUI（宿主直编，系统依赖 best-effort apt）
+  # Linux x86_64：CLI + GUI .deb（宿主直编，系统依赖 apt）
   # ------------------------------------------------------------------
   linux:
     name: build & package (linux-x86_64)
@@ -188,31 +199,31 @@ jobs:
           ( cd dist/linux && zip -qr "landesk-${ver}-linux-x86_64.zip" cli )
           ls -1 dist/linux/*.zip
 
-      - name: GUI shell (x86_64, best-effort)
-        # Tauri v2 on ubuntu-24.04：webkit2gtk-4.1 等系统库；缺则跳过 GUI 不出 zip。
+      - name: GUI installer (.deb, best-effort)
+        # Tauri v2 on ubuntu-latest：webkit2gtk-4.1 等系统库 + dpkg-deb；缺则跳过。
         continue-on-error: true
         run: |
           set -u
           ver="${GITHUB_REF_NAME#v}"
           sudo apt-get update -qq && sudo apt-get install -y -qq \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libssl-dev libxdo-dev pkg-config file \
+            librsvg2-dev libssl-dev libxdo-dev pkg-config file libfuse2 \
             || echo "apt install failed, GUI likely skipped"
-          mv ui/src-tauri/.cargo/config.toml ui/src-tauri/.cargo/config.toml.bak || true
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
-          ( cd ui/src-tauri && cargo build --features tauri --release --locked ) \
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
             || echo "GUI build failed, skipping"
-          mv ui/src-tauri/.cargo/config.toml.bak ui/src-tauri/.cargo/config.toml || true
-          if [[ -f ui/src-tauri/target/release/landesk-app ]]; then
+          B="ui/src-tauri/target/release/bundle/deb"
+          if [[ -d "$B" ]]; then
             mkdir -p dist/linux/gui
-            cp ui/src-tauri/target/release/landesk-app dist/linux/gui/
-            printf 'LanDesk GUI (Tauri) Linux x86_64（未签名）。依赖 webkit2gtk-4.1 / gtk3，\n' \
-             'Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0\n' \
-             > dist/linux/gui/README.txt
-            ( cd dist/linux && zip -qr "landesk-${ver}-gui-linux-x86_64.zip" gui )
-            echo "GUI ready"
-          else
-            echo "GUI binary missing, no gui zip"
+            find "$B" -maxdepth 1 -name '*.deb' 2>/dev/null | while read -r d; do
+              cp -f "$d" "dist/linux/gui/landesk-${ver}-gui-linux-x86_64.deb"
+            done
+            echo "GUI deb: $(ls -1 dist/linux/gui 2>/dev/null | tr '\n' ' ')"
           fi
 
       - name: Upload artifacts
@@ -220,12 +231,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist-linux
-          path: dist/linux/*.zip
+          path: dist/
           if-no-files-found: warn
 
   # ------------------------------------------------------------------
-  # Linux aarch64 (arm)：宿主 gcc-aarch64-linux-gnu 交叉（.cargo/config.toml 已指定 linker）
-  # 仅 CLI（GUI 壳跨 target 系统库暂不覆盖）
+  # Linux aarch64 (arm)：宿主 gcc-aarch64-linux-gnu 交叉（ring 需 CC_<target>）
+  # 仅 CLI（GUI 跨 target 系统库暂不覆盖）。构建步 best-effort，失败不红整体 run。
   # ------------------------------------------------------------------
   linux-aarch64:
     name: build & package (linux-aarch64)
@@ -239,84 +250,116 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
           rustup target add aarch64-unknown-linux-gnu
 
-      - name: Build CLI (aarch64, 主仓 vendor 离线)
+      - name: Build CLI (aarch64, ring CC 交叉, best-effort)
+        # 主仓 .cargo/config.toml 已设 linker=aarch64-linux-gnu-gcc；再补 CC_<target>
+        # 让 ring（cc C 构建）能用目标 C 编译器，避免交叉 build.rs 探针失败。
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -u
           ver="${GITHUB_REF_NAME#v}"
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          echo "== cross CLI aarch64"
           cargo build --release --locked \
             -p controlled -p controller -p relay-server -p signaling-server \
-            --target aarch64-unknown-linux-gnu
-          mkdir -p dist/linux-aarch64/cli
-          for b in controlled controller relay-server signaling-server; do
-            cp "target/aarch64-unknown-linux-gnu/release/${b}" "dist/linux-aarch64/cli/${b}"
-          done
-          file dist/linux-aarch64/cli/controlled || true
-          ( cd dist/linux-aarch64 && zip -qr "landesk-${ver}-linux-aarch64.zip" cli )
-          ls -1 dist/linux-aarch64/*.zip
+            --target aarch64-unknown-linux-gnu \
+            && {
+              mkdir -p dist/linux-aarch64/cli
+              for b in controlled controller relay-server signaling-server; do
+                cp "target/aarch64-unknown-linux-gnu/release/${b}" "dist/linux-aarch64/cli/${b}"
+              done
+              file dist/linux-aarch64/cli/controlled || true
+              ( cd dist/linux-aarch64 && zip -qr "landesk-${ver}-linux-aarch64.zip" cli )
+              echo "aarch64 CLI ready"
+            } \
+            || echo "aarch64 cross build failed (ring/CC?), skipping aarch64 assets"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dist-linux-aarch64
-          path: dist/linux-aarch64/*.zip
+          path: dist/
           if-no-files-found: warn
 
   # ------------------------------------------------------------------
-  # 聚合：SHA256 + 版本说明 + 发 GitHub Release
+  # 聚合：SHA256 + 版本说明 + 发 GitHub Release（恒含 SHA256SUMS.txt，glob 不空）
   # ------------------------------------------------------------------
   release:
     name: publish GitHub Release
     runs-on: ubuntu-latest
     needs: [macos, windows, linux, linux-aarch64]
-    # 单平台 job 失败不阻塞发布（缺资产在 notes 标注）；仅全取消才不发
+    # 单平台 job 失败/缺资产不阻塞发布（notes 标注）；仅全取消才不发
     if: ${{ !cancelled() }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: 聚合资产 + SHA256
+      - name: 聚合资产（安装包 + CLI zip）+ SHA256
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
           mkdir -p release-assets
-          found=0
-          while IFS= read -r f; do
-            cp -f "$f" release-assets/
-            found=1
-          done < <(find dist -name 'landesk-*' \( -name '*.zip' \) -print)
-          if [[ "${found}" -eq 1 ]]; then
-            ( cd release-assets && sha256sum landesk-* > SHA256SUMS.txt )
+          # 收集所有产物：CLI zip + 各平台安装包（dmg / deb / exe / app zip）
+          # download-artifact 展平到 dist/<artifact-name>/...；递归取全部目标扩展
+          find dist -type f \( -name 'landesk-*.zip' \
+                                 -name '*.dmg' -name '*.deb' \
+                                 -name '*-setup.exe' -name '*-app.zip' \) \
+               -exec cp -f {} release-assets/ \; 2>/dev/null || true
+          # 归一化命名兜底：若某 GUI 步没来得及归一（原始 tauri 名），补成 landesk-* 前缀。
+          # （各 GUI 步已 cp 成 landesk-* 名，此处多数是 no-op；*.dmg 不区分 arch 兜底命名）
+          ( cd release-assets && for f in *; do
+              [[ "${f}" == landesk-* || -f SHA256SUMS.txt ]] && continue
+              case "$f" in
+                *.dmg)  mv -f "$f" "landesk-${ver}-gui-macos.dmg" ;;
+                *.deb)  mv -f "$f" "landesk-${ver}-gui-linux-x86_64.deb" ;;
+                *.exe)  mv -f "$f" "landesk-${ver}-gui-windows-x86_64-setup.exe" ;;
+              esac
+            done )
+          # SHA256：非空才算（避免 `sha256sum` 无参时读 stdin 挂死）；find -exec + 空格安全
+          has_assets=$(cd release-assets && ls -1 2>/dev/null | grep -v '^SHA256SUMS.txt$' | head -1 || true)
+          if [[ -n "${has_assets:-}" ]]; then
+            ( cd release-assets && find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' \
+                -exec sha256sum {} + > SHA256SUMS.txt )
           else
-            echo "sha256sum: no assets found (all build jobs failed?)" > release-assets/SHA256SUMS.txt \
-              2>/dev/null || { mkdir -p release-assets && echo "no assets" > release-assets/SHA256SUMS.txt; }
+            echo "sha256sum: no assets (all build jobs failed?)" > release-assets/SHA256SUMS.txt
           fi
+
+          # 实际产出的资产清单（写进 notes，缺哪个一目了然）
           {
             echo "LanDesk v${ver}（tag ${GITHUB_REF_NAME}）"
             echo ""
-            echo "## 资产"
-            echo "- **CLI 二进制**（五架构全出，无编码 feature 骨架版；完整编码产物需本地备 thirdparty/ 后跑 \`scripts/release/build-all.sh\`）："
-            echo "  - \`landesk-${ver}-macos-x86_64.zip\` / \`landesk-${ver}-macos-arm64.zip\`"
-            echo "  - \`landesk-${ver}-windows-x86_64.zip\`（.exe）"
-            echo "  - \`landesk-${ver}-linux-x86_64.zip\` / \`landesk-${ver}-linux-aarch64.zip\`"
-            echo "  - 各 zip 含 controlled / controller / relay-server / signaling-server"
-            echo "- **GUI 壳（Tauri，best-effort，未签名/未公证）**："
-            echo "  - \`landesk-${ver}-gui-macos-universal.zip\`（x86_64 + arm64 lipo universal）"
-            echo "  - \`landesk-${ver}-gui-windows-x86_64.zip\` / \`landesk-${ver}-gui-linux-x86_64.zip\`"
-            echo "  - linux aarch64 暂不出 GUI（跨 target 系统库未覆盖，CLI 兜底）"
-            echo "- 校验：\`SHA256SUMS.txt\`"
+            echo "## 本次产出资产"
+            echo '```'
+            ls -1 release-assets/ | grep -v '^SHA256SUMS.txt$' || echo "（无——各构建 job 需查日志）"
+            echo '```'
             echo ""
-            echo "## 说明"
-            echo "- CLI 为**无编码 feature 骨架**：avcodec-wrap 各编码器后端为占位空 feature，"
-            echo "  完整 H.264/硬编产物需本地备 thirdparty/（scripts/build-libav/）后重跑。"
-            echo "- GUI 壳未做 macOS 公证 / Windows 签名：首运需手动放行（macOS 右键-打开；"
-            echo "  Windows SmartScreen 选「仍要运行」）。"
-            echo "- 稳定性验证：scripts/release/stable-72h.sh。"
+            echo "## GUI 安装包（headline）"
+            echo "- macOS：\`landesk-${ver}-gui-macos-{x86_64,arm64}.dmg\`（+ 对应 .app zip）—未公证，首运右键-打开"
+            echo "- Windows x64：\`landesk-${ver}-gui-windows-x86_64-setup.exe\`（NSIS，未签名）"
+            echo "- Linux amd64：\`landesk-${ver}-gui-linux-x86_64.deb\`（依赖 libwebkit2gtk-4.1 / gtk3）"
+            echo "- 缺某平台：该 GUI 步 best-effort 失败，见对应 job 日志；CLI zip 仍可用。"
+            echo ""
+            echo "## 无头 CLI / 服务端（五架构 backbone）"
+            echo "- \`landesk-${ver}-macos-{x86_64,arm64}.zip\` / \`landesk-${ver}-windows-x86_64.zip\`"
+            echo "  / \`landesk-${ver}-linux-x86_64.zip\` / \`landesk-${ver}-linux-aarch64.zip\`（交叉 best-effort）"
+            echo "- 每 zip 含 controlled / controller / relay-server / signaling-server"
+            echo "- 为**无编码 feature 骨架**：完整 H.264/硬编产物需本地备 thirdparty/ 后跑"
+            echo "  \`scripts/release/build-all.sh\`。"
+            echo ""
+            echo "## 校验"
+            echo "- \`SHA256SUMS.txt\`"
+            echo "- 稳定性验证：\`scripts/release/stable-72h.sh\`。"
           } > release-notes.md
           echo "---- 资产清单 ----"
           ls -1 release-assets/
@@ -327,8 +370,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: "LanDesk ${{ github.ref_name }}"
           files: |
-            release-assets/*.zip
-            release-assets/SHA256SUMS.txt
+            release-assets/*
           body_path: release-notes.md
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false

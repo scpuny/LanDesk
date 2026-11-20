@@ -19,6 +19,28 @@
     "withGlobalTauri": true
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "shortDescription": "LanDesk 局域网远程控制",
+    "longDescription": "LanDesk 局域网远程控制桌面端（Tauri）。",
+    "category": "Utility",
+    "targets": [
+      "nsis",
+      "dmg",
+      "app",
+      "deb"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon-512.png",
+      "icons/icon-1024.png"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
