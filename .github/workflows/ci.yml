@@ -37,8 +37,33 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Force LF checkout（保护 vendor 的 .cargo-checksum 完整性）
+        # Windows runner 默认 git autocrlf=true，会把 vendor 嵌套 crate 的 text=auto 文件转 CRLF
+        # → 工作区字节 ≠ .cargo-checksum.json 的 LF sha256 → cargo build --locked 报 checksum changed。
+        # 与 release.yml 同一套修复，必须在 checkout 之前设全局（Linux/mac 无副作用）。
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节（根治 Windows CRLF 转码）
+        # 即便 autocrlf=false，嵌套 crate 的 `* text=auto` 仍可能按 core.eol=crlf(Windows 默认)
+        # smudge 成 CRLF。显式 core.eol=lf + 先删工作区再 checkout -f，强制从 git 对象库
+        # （blob 恒 LF）重新物化；stat 匹配会跳过重写，故必须 rm -rf。探针用 python3 校验。
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          git config core.eol lf
+          rm -rf vendor/ || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" \
+                   | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] \
+            || { echo "vendor/ self-heal FAILED ${probe}: want=${want} got=${got}" >&2; exit 1; }
+          echo "vendor/ self-healed: ${probe} == HEAD LF blob (sha256 ${got})"
 
       - name: Install Rust (stable, toolchain pinned)
         # rust-toolchain.toml 声明 stable，rustup 按文件自动安装
@@ -72,13 +97,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install cross
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://cross-rs.dev/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Rust (stable, toolchain pinned)
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: aarch64 cargo check (cross container)
+      # 原方案 `curl cross-rs.dev/install.sh | sh` 在 runner 上 DNS 解析失败（curl: 6），
+      # 且管道吞掉退出码 -> "安装成功"但 cross 未落盘 -> 后续 cross: command not found。
+      # 改用 apt 系统交叉工具链（与 release.yml 的 linux-aarch64 job 一致），
+      # 不依赖外部域名、不依赖 Docker；.cargo/config.toml 已设 linker=aarch64-linux-gnu-gcc。
+      - name: Install aarch64 cross toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: aarch64 cargo check
         # landesk-core 为流水线核心，跨机 OK3568 以它为准做编译检查。
-        # cross 默认容器已含 aarch64 交叉工具链；libav 裁剪产物在真机/本地由 build-libav 提供，
-        # 此 job 仅验证 Rust 侧可编译（无编码 feature 骨架），不要求 thirdparty。
-        run: cross check --target aarch64-unknown-linux-gnu -p landesk-core
+        # CC_<target> 让 ring（cc C 构建）用目标 C 编译器，避免交叉 build.rs 探针失败。
+        # libav 裁剪产物在真机/本地由 build-libav 提供，此 job 仅验证 Rust 侧可编译。
+        run: |
+          set -euo pipefail
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          cargo check --locked --target aarch64-unknown-linux-gnu -p landesk-core
