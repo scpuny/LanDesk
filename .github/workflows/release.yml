@@ -486,9 +486,10 @@ jobs:
           mkdir -p release-assets
           # 收集所有产物：CLI zip + 各平台安装包（dmg / deb / exe / app zip）
           # download-artifact 展平到 dist/<artifact-name>/...；递归取全部目标扩展
+          # ★ 多个 -name 之间必须显式 -o：默认 AND 会让一个文件无法同时匹配所有扩展 → 永远空
           find dist -type f \( -name 'landesk-*.zip' \
-                                 -name '*.dmg' -name '*.deb' -name '*.rpm' \
-                                 -name '*-setup.exe' -name '*-app.zip' \) \
+                                 -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \
+                                 -o -name '*-setup.exe' -o -name '*-app.zip' \) \
                -exec cp -f {} release-assets/ \; 2>/dev/null || true
           # 归一化命名兜底：若某 GUI 步没来得及归一（原始 tauri 名），补成 landesk-* 前缀。
           # （各 GUI 步已 cp 成 landesk-* 名，此处多数是 no-op；*.dmg 不区分 arch 兜底命名）
