@@ -22,7 +22,7 @@ path = "src/main.rs"
 [features]
 default = []
 # 开启后编译 Tauri app 本体（需 tauri crate + GUI/系统依赖，离线 vendor 不含）。
-tauri = ["dep:tauri", "dep:tauri-build", "dep:tracing"]
+tauri = ["dep:tauri", "dep:tauri-build", "dep:tracing", "dep:base64"]
 
 [dependencies]
 # 纯命令内核 + 全部业务类型（经 landesk-ui re-export；已在主仓离线 vendor）。
@@ -38,6 +38,8 @@ tauri = { version = "2", optional = true }
 # P2.7 最小日志捕获：直接依赖 `tracing`（壳 vendor 已含 0.1.44 + tracing-core，离线安全）。
 # 仅 tauri feature 用（手搓 Subscriber 捕获进 LogRing，不引 tracing-subscriber）。
 tracing = { version = "0.1", optional = true }
+# 会话窗「截图」命令解码 data-URL PNG 落盘（0.21.7 在壳 vendor，--locked 不动）。
+base64 = { version = "0.21", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

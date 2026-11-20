@@ -290,6 +290,52 @@ fn window_close(window: tauri::Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+// ---------- 会话窗「截图」落盘（#71，矩阵 §7.5「截图」）----------
+// 前端抓当前画面 canvas 帧（`canvas.toDataURL('image/png')`）得 data-URL，调本命令落盘到
+// 用户 `~/Pictures/landesk/screenshots/`。仅写文件、不依赖新协议帧（远程画面截图是客户端侧
+// 抓当前渲染帧，非受控端取帧指令）。出参 = 落盘绝对路径（成功）；空串 = 失败（前端据此 toast）。
+// base64 0.21 引擎 API：`BASE64_STANDARD.decode`。
+
+/// 会话窗截图：解码 PNG data-URL → 写 `~/Pictures/landesk/screenshots/landesk-<epoch>.png`。
+/// 出落盘绝对路径（`String`；空串表示写入失败）。data-URL 前缀不匹配 / base64 坏均回空串不抛。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn screenshot_save(data_url: String) -> String {
+    // 1) 剥 `data:image/png;base64,` 前缀（容忍 `data:image/png` 无参数 / 其它 mime）。
+    let comma = match data_url.find(',') {
+        Some(i) => i,
+        None => return String::new(),
+    };
+    let b64 = &data_url[comma + 1..];
+
+    // 2) 解码（base64 0.21 引擎）。
+    use base64::Engine as _;
+    use base64::prelude::BASE64_STANDARD;
+    let bytes = match BASE64_STANDARD.decode(b64) {
+        Ok(b) => b,
+        Err(_) => return String::new(),
+    };
+
+    // 3) 目标目录：`$HOME/Pictures/landesk/screenshots`（无 HOME 退当前目录）。
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let dir = std::path::Path::new(&home).join("Pictures").join("landesk").join("screenshots");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return String::new();
+    }
+    let filename = format!("landesk-{}.png", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0));
+    let path = dir.join(filename);
+    match std::fs::write(&path, &bytes) {
+        Ok(_) => path.to_string_lossy().into(),
+        Err(e) => {
+            tracing::warn!(error = %e, "会话截图写盘失败");
+            String::new()
+        }
+    }
+}
+
 // ---------- 会话独立 OS 窗体（custom 窗体，完整 最小化/最大化/关闭）----------
 // 主窗体发起远程控制/连接时调 `session_window_open`：写入 `session_launch` 目标，
 // 按需创建/复用 label "session" 的独立窗体（`decorations:false` 自绘）并送达目标；
@@ -443,6 +489,7 @@ pub fn run() {
             window_toggle_maximize,
             window_minimize,
             window_close,
+            screenshot_save,
             session_window_open,
             session_window_target
         ])
