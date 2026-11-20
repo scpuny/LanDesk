@@ -159,6 +159,12 @@ impl OneClickSession {
         Ok(self.conn.recv_video_datagram().await?)
     }
 
+    /// 克隆出一个**可独立持有**的视频 Datagram 接收句柄（`Send + Sync + 'static`），
+    /// 供后台推流泵 `move` 进独立 `tokio` 任务循环读帧，不占控制流 `&mut` 锁（P2② 画面推流）。
+    pub fn video_rx(&self) -> quic_link::VideoDatagramRx {
+        self.conn.video_rx()
+    }
+
     /// 优雅关闭会话。
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.conn.close(code, reason);

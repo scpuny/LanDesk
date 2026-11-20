@@ -21,6 +21,7 @@ pub mod plan;
 pub mod reconnect_view;
 pub mod session;
 pub mod status;
+pub mod video;
 
 pub use config_store::{ConfigStore, StoreError, default_config_path};
 pub use devices::{device_rows, DeviceRow, DeviceTable, now_secs};
@@ -37,6 +38,7 @@ pub use session::{
     SessionStatusView, SessionTargetView,
 };
 pub use status::{StatusBarModel, conn_mode_label, encoder_label, state_label};
+pub use video::{base64_encode, frame_to_msg, VideoFrameMsg};
 
 // ---------- 命令内核便捷 re-export（Tauri 壳只依赖 `landesk-ui` 即可取到全部业务类型）----------
 pub use ice::HoleResult;
