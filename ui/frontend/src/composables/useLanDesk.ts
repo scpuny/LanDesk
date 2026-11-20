@@ -1,6 +1,6 @@
 // LanDesk 数据层单例：浏览器预览用 mock 数据，真实宿主走 lib/landesk.ts 桥接。
 import { reactive, ref, type Ref } from 'vue'
-import { landesk, detectLiveHost, type ReconnectSchedule } from '../lib/landesk'
+import { landesk, detectLiveHost, type ReconnectSchedule, type RawLogLine } from '../lib/landesk'
 import type {
   DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo,
 } from '../types/index'
@@ -119,13 +119,57 @@ async function saveConfig(): Promise<void> {
 }
 
 function refreshTempPassword(): void {
+  // live：后端 `gen_temp_password` 每次刷新出新 6 位码，重新拉取本机信息即可；
+  // 非 live：本地随机一个 6 位码作预览。
+  if (liveNow) {
+    loadLocal()
+    return
+  }
   const n = Math.floor(100000 + Math.random() * 900000)
   local.tempPassword = String(n)
+}
+
+// 本机信息（P2.8）：live 走后端 `localInfo()`（设备码 FNV 派生 + 临时密码 6 位），非 live 保留 mock。
+async function loadLocal(): Promise<void> {
+  if (!(await ensureLive())) return
+  try { Object.assign(local, await landesk.localInfo()) }
+  catch { /* 保留 mock 预览值 */ }
+}
+
+// 日志（P2.8）：live 走后端 `logQuery(level, keyword)`（环形缓冲 + 过滤），非 live 保留 mock。
+// 后端出参 `t` 为 epoch 微秒（number），前端展示需格式化成本地 `HH:MM:SS.mmm` 字符串。
+function fmtLogTime(tMicros: number): string {
+  if (!tMicros) return '--:--:--.---'
+  const d = new Date(Math.floor(tMicros / 1000))
+  const ms = String(Math.floor((tMicros % 1000000) / 1000)).padStart(3, '0')
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${ms}`
+}
+function normalizeLogs(rows: RawLogLine[]): LogLine[] {
+  return rows.map((r) => ({
+    t: fmtLogTime(r.t),
+    level: (r.level || 'INFO') as LogLine['level'],
+    mod: r.mod,
+    msg: r.msg,
+    kv: r.kv,
+  }))
+}
+async function loadLogs(level?: string, keyword?: string): Promise<void> {
+  if (!(await ensureLive())) { logs.value = [...mockLogs]; return }
+  try { logs.value = normalizeLogs(await landesk.logQuery(level, keyword) || []) }
+  catch { logs.value = [...mockLogs] }
+}
+
+// 日志清空（P2.8）：live 调后端 `logClear()`，非 live 本地清。
+async function clearLogs(): Promise<void> {
+  if (await ensureLive()) { try { await landesk.logClear() } catch { /* 忽略 */ } }
+  logs.value = []
 }
 
 export interface UseLanDeskReturn {
   isLive: Ref<boolean>
   local: LocalInfo
+  loadLocal: () => Promise<void>
   devices: Ref<DeviceRow[]>
   deviceLoading: Ref<boolean>
   loadDevices: () => Promise<void>
@@ -137,14 +181,18 @@ export interface UseLanDeskReturn {
   reconnectPlan: Ref<ReconnectSchedule>
   loadReconnectPlan: () => Promise<void>
   logs: Ref<LogLine[]>
+  loadLogs: (level?: string, keyword?: string) => Promise<void>
+  clearLogs: () => Promise<void>
   refreshTempPassword: () => void
 }
 
 export function useLanDesk(): UseLanDeskReturn {
   return {
-    isLive, local, devices, deviceLoading, loadDevices,
+    isLive, local, loadLocal,
+    devices, deviceLoading, loadDevices,
     config, configLoading, configError, loadConfig, saveConfig,
     reconnectPlan, loadReconnectPlan,
-    logs, refreshTempPassword,
+    logs, loadLogs, clearLogs,
+    refreshTempPassword,
   }
 }

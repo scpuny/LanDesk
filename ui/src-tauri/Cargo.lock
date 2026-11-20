@@ -2045,6 +2045,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -6,9 +6,9 @@
 //! 业务类型全部经 `landesk-ui` 便捷 re-export 取到（壳只依赖内核一个 crate）。
 
 use landesk_ui::{
-    Config, ConfigStore, CoreEvent, DeviceRow, HoleResult, OnlineDevice, PathDecision,
-    ReconnectSchedule, ReconnectScheduler, ReconnectView, StatusBarModel, decide_path,
-    device_rows, schedule_of, view_of,
+    Config, ConfigStore, CoreEvent, DeviceRow, HoleResult, LocalInfo, LogLine, LogRing,
+    OnlineDevice, PathDecision, ReconnectSchedule, ReconnectScheduler, ReconnectView,
+    StatusBarModel, decide_path, device_rows, local_info_of, schedule_of, view_of,
 };
 
 /// 配置页：读或首次生成默认模板（FR-08）。
@@ -47,6 +47,31 @@ pub fn choose_path(inner_found: bool, hole: &HoleResult, relay_enabled: bool) ->
     decide_path(inner_found, hole, relay_enabled)
 }
 
+/// 本机信息（P2.7「本机信息 API」，矩阵 §7.5）：由配置 + 宿主态出 [`LocalInfo`]。
+/// 宿主传 `device_code`/`temp_password`（通常 [`landesk_ui::device_code_from`] /
+/// [`landesk_ui::gen_temp_password`] 派生）、`enc` 能力、`mdns_advertising`/`online` 宿主态。
+pub fn local_info(
+    store: &ConfigStore,
+    device_code: &str,
+    temp_password: &str,
+    enc: Vec<String>,
+    mdns_advertising: bool,
+    online: bool,
+) -> Result<LocalInfo, landesk_ui::StoreError> {
+    let cfg = store.load_or_init()?;
+    Ok(local_info_of(&cfg, device_code, temp_password, enc, mdns_advertising, online))
+}
+
+/// 日志查询（P2.7「日志查询 API」，矩阵 §7.5）：环形缓冲 + 级别/关键字过滤（最旧→最新）。
+pub fn log_query(ring: &LogRing, level: &str, keyword: &str) -> Vec<LogLine> {
+    ring.export_lines(level, keyword)
+}
+
+/// 日志清空（P2.7「日志清空 API」，矩阵 §7.5）：计数归零，容量不变。
+pub fn log_clear(ring: &mut LogRing) {
+    ring.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +104,33 @@ mod tests {
             "test-dev"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn local_info_kernel() {
+        let path =
+            std::env::temp_dir().join(format!("landesk-cmd-li-{}.json", std::process::id()));
+        let store = ConfigStore::with_path(&path);
+        // 首次读生成默认模板（device_name 空），local_info 据此派生。
+        let info = local_info(&store, "83FA217C", "629418", vec!["QSV".into()], true, true)
+            .expect("local_info");
+        assert_eq!(info.device_code, "83FA217C");
+        assert_eq!(info.temp_password, "629418");
+        assert_eq!(info.enc, vec!["QSV".to_string()]);
+        assert!(info.mdns, "mdns_enabled(默认 true) + 广播中 → 真");
+        assert!(info.online);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn log_query_and_clear() {
+        let mut ring = LogRing::new();
+        ring.push(LogLine::new("INFO", "session", "connected", "peer=ABCD", 1));
+        ring.push(LogLine::new("ERROR", "auth", "failed", "peer=ABCD", 2));
+        assert_eq!(log_query(&ring, "ALL", "").len(), 2, "全级别 2 条");
+        assert_eq!(log_query(&ring, "ERROR", "").len(), 1, "仅 ERROR");
+        assert_eq!(log_query(&ring, "ALL", "auth").len(), 1, "关键字命中");
+        log_clear(&mut ring);
+        assert!(ring.is_empty(), "清空后空");
     }
 }

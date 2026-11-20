@@ -14,12 +14,18 @@
 
 pub mod config_store;
 pub mod devices;
+pub mod local_info;
+pub mod logs;
 pub mod plan;
 pub mod reconnect_view;
 pub mod status;
 
 pub use config_store::{ConfigStore, StoreError, default_config_path};
 pub use devices::{device_rows, DeviceRow, DeviceTable, now_secs};
+pub use local_info::{
+    device_code_from, gen_temp_password, local_info_of, LocalInfo,
+};
+pub use logs::{LevelFilter, LogLine, LogRing, DEFAULT_LOG_CAPACITY};
 pub use plan::{decide_path, PathDecision, PathDecisionView};
 pub use reconnect_view::{ReconnectSchedule, ReconnectView, schedule_of, view_of};
 pub use status::{StatusBarModel, conn_mode_label, encoder_label, state_label};

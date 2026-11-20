@@ -7,7 +7,7 @@ import Icon from '../components/common/Icon.vue'
 import EmptyState from '../components/common/EmptyState.vue'
 
 const ui = useUi()
-const { local, devices, deviceLoading, loadDevices, refreshTempPassword } = useLanDesk()
+const { local, devices, deviceLoading, loadDevices, refreshTempPassword, loadLocal } = useLanDesk()
 
 const quickCode = ref('41C98B7E')
 const search = ref('')
@@ -39,7 +39,7 @@ function kindIcon(kind: DeviceKind): string {
 }
 function lastSeen(n: number): string { return n ? `离线 ${n} 分钟` : '刚刚在线' }
 
-onMounted(loadDevices)
+onMounted(() => { loadDevices(); loadLocal() })
 </script>
 
 <template>
@@ -83,7 +83,7 @@ onMounted(loadDevices)
                 {{ local.name }}
                 <Icon name="edit" :size="13" class="ld-local__edit" />
               </div>
-              <div class="ld-local__online"><span class="ll-dot ll-dot--success" /> 在线 · 可被连接</div>
+              <div class="ld-local__online"><span class="ll-dot" :class="local.online ? 'll-dot--success' : ''" /> {{ local.online ? '在线 · 可被连接' : '离线' }}</div>
             </div>
           </div>
 
@@ -112,10 +112,10 @@ onMounted(loadDevices)
         <!-- 本机运行信息卡（白底，独立） -->
         <section class="ld-card ld-card__pad ld-info-card">
           <div class="ld-info-card__title">本机运行信息</div>
-          <div class="ld-kvline"><span class="ld-kvline__k">mDNS 发现</span><span class="ld-kvline__v"><span class="ll-dot ll-dot--success" /> 已启用</span></div>
-          <div class="ld-kvline"><span class="ld-kvline__k">信令服务</span><span class="ld-kvline__v ld-mono">{{ local.signaling }}</span></div>
-          <div class="ld-kvline"><span class="ld-kvline__k">中继服务</span><span class="ld-kvline__v"><span class="ll-dot ll-dot--success" /> 可用</span></div>
-          <div class="ld-kvline"><span class="ld-kvline__k">编码能力</span><span class="ld-kvline__v"><span class="ll-tag">{{ local.enc.join(' · ') }}</span></span></div>
+          <div class="ld-kvline"><span class="ld-kvline__k">mDNS 发现</span><span class="ld-kvline__v"><span class="ll-dot" :class="local.mdns ? 'll-dot--success' : 'll-dot--idle'" /> {{ local.mdns ? '已启用' : '未启用' }}</span></div>
+          <div class="ld-kvline"><span class="ld-kvline__k">信令服务</span><span class="ld-kvline__v ld-mono">{{ local.signaling || '未配置' }}</span></div>
+          <div class="ld-kvline"><span class="ld-kvline__k">中继服务</span><span class="ld-kvline__v"><span class="ll-dot" :class="local.relay ? 'll-dot--success' : 'll-dot--idle'" /> {{ local.relay ? '可用' : '不可用' }}</span></div>
+          <div class="ld-kvline"><span class="ld-kvline__k">编码能力</span><span class="ld-kvline__v"><span v-if="local.enc.length" class="ll-tag">{{ local.enc.join(' · ') }}</span><span v-else class="ld-form-help">未探测</span></span></div>
           <div class="ll-divider" />
           <div class="ld-sess-actions">
             <button class="ll-btn ll-btn--default" @click="ui.navigate('settings')"><Icon name="settings" :size="14" /> 受控设置</button>
