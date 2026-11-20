@@ -15,12 +15,20 @@ export interface ReconnectView {
   label: string
 }
 
-/** 连接路径决策（对齐后端 `ui::PathDecision` / REST `ChoosePathResp`）。
- *  `use.connMode` = `ConnMode`（`inner|p2p|relay`）；`nopath` = 拒绝连接。
- *  两宿主 JSON 形状略有差异（Tauri 裸 `PathDecision` 为 `{Use:{Inner}}`，REST 为
- *  `{use:{conn_mode}}`/`{nopath:true}`），消费方按「取 `use.connMode` 或 `nopath`」兼容读。 */
+/** 重连退避计划（对齐后端 `ui::ReconnectSchedule`，P1.2「会话命令面」，喂 Session 重连浮层）。 */
+export interface ReconnectSchedule {
+  max_attempts: number
+  /** 第 N 次重试前应等待的秒数（N 从 1 起，长度 = max_attempts；默认 1/2/4/8/16）。 */
+  waits: number[]
+  label: string
+}
+
+/** 连接路径决策（对齐后端 `ui::PathDecisionView`，双宿主同形，P1.3 归一）：
+ *  - 有路径：`{ connMode: 'inner'|'p2p'|'relay' }`
+ *  - 无路径：`{ nopath: true }`
+ *  `connMode` 小写与 `ConnMode` 对齐；消费方读 `dec.connMode`（无则 `dec.nopath` 为真）。 */
 export interface PathDecision {
-  use?: { connMode: ConnMode }
+  connMode?: ConnMode
   nopath?: boolean
 }
 
@@ -102,10 +110,13 @@ export const landesk = {
       : rest<void>('/api/config', { method: 'POST', body: config })
   },
 
-  /** 设备列表（FR-01.2/01.4） */
-  deviceList(devices: RawDevice[], nowEpochSecs: number): Promise<RawDevice[]> {
+  /** 设备列表（FR-01.2/01.4，P1.1 下沉）。
+   *  - Tauri：壳内 `AppState.devices`（后台 mDNS 驱动）自维护，命令**无入参**，直接出当前表。
+   *  - REST：`/api/devices`（ui-server 共享 `DeviceTable`，后台镜像监听器在线表）。
+   *  入参 `devices`/`nowEpochSecs` 仅兼容旧 REST 调用面，Tauri 轨忽略。 */
+  deviceList(_devices: RawDevice[] = [], _nowEpochSecs: number = 0): Promise<RawDevice[]> {
     return isTauri()
-      ? tauriInvoke<RawDevice[]>('device_list', { devices, nowEpochSecs })
+      ? tauriInvoke<RawDevice[]>('device_list')
       : rest<RawDevice[]>('/api/devices')
   },
 
@@ -123,6 +134,13 @@ export const landesk = {
       : rest<PathDecision>('/api/choose-path', {
           method: 'POST', body: { innerFound, hole, relayEnabled },
         })
+  },
+
+  /** 重连退避计划（P1.2「会话命令面」，FR-05.4）：完整 1/2/4/8/16s 序列 + 次数，喂 Session 重连浮层。 */
+  reconnectSchedule(): Promise<ReconnectSchedule> {
+    return isTauri()
+      ? tauriInvoke<ReconnectSchedule>('reconnect_schedule')
+      : rest<ReconnectSchedule>('/api/reconnect-schedule')
   },
 }
 

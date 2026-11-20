@@ -1,24 +1,39 @@
 <script setup lang="ts">
 // 会话页：状态机驱动（state.sessionState），对齐 V2 设计稿四态 + PRD 七态。
 // 状态枚举做 class，中文文案放映射表，禁止中文写进 CSS 类名。
-import { computed, ref, onBeforeUnmount } from 'vue'
+// P1.2：重连浮层改用后端退避计划（reconnectPlan），替代硬编码 2/5 与 1/2/4/8s。
+import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
 import { useUi } from '../composables/useUi'
+import { useLanDesk } from '../composables/useLanDesk'
 import type { SessionState, ConnMode } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
 const { state, navigate, toast, confirm } = useUi()
+const { reconnectPlan, loadReconnectPlan } = useLanDesk()
+
+// 退避计划（后端下发；非 live 用默认预览序列 1/2/4/8/16s · 最多 5 次）。
+const maxAttempts = computed(() => reconnectPlan.value.max_attempts)
+const waitLabel = computed(() => reconnectPlan.value.waits.map((w) => `${w}s`).join(' / '))
+const nextWait = computed(() => {
+  const waits = reconnectPlan.value.waits
+  const i = Math.min(retryAttempt.value, waits.length) - 1
+  return waits[i] ?? waits[waits.length - 1] ?? 0
+})
 
 const states: Record<SessionState, { label: string; dot: string }> = {
   idle: { label: '未连接', dot: '' },
   auth: { label: '鉴权中', dot: 'll-dot--brand' },
   running: { label: '运行中', dot: 'll-dot--success ll-dot--pulse' },
-  reconnecting: { label: `重连中 ${'2'}/5`, dot: 'll-dot--warning' },
+  reconnecting: { label: '重连中', dot: 'll-dot--warning' },
   authfailed: { label: '鉴权失败', dot: 'll-dot--danger' },
   nopath: { label: '无可用路径', dot: 'll-dot--danger' },
   closed: { label: '已关闭', dot: '' },
 }
 const stateInfo = computed(() => states[state.sessionState] || states.idle)
 const targetName = computed(() => state.sessionTarget?.name || state.sessionTarget?.id || '远程设备')
+// 顶部状态标签：重连态动态拼接「重连中 N/max」（N 为演示计数，max 来自退避计划）。
+const stateLabel = computed(() => stateInfo.value.label +
+  (state.sessionState === 'reconnecting' ? ` ${Math.min(retryAttempt.value, maxAttempts.value)}/${maxAttempts.value}` : ''))
 
 const scaleMode = ref('自适应')
 const retryAttempt = ref(2)
@@ -51,6 +66,7 @@ function cycleState() {
 }
 
 let timer = null
+onMounted(() => { loadReconnectPlan() })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
@@ -58,7 +74,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
   <div class="ld-session">
     <!-- 顶部工具条 -->
     <header class="ld-sess-top">
-      <span class="ld-sess-state"><span class="ll-dot" :class="stateInfo.dot" /> {{ stateInfo.label }}</span>
+      <span class="ld-sess-state"><span class="ll-dot" :class="stateInfo.dot" /> {{ stateLabel }}</span>
       <span class="ld-sess-target">
         <Icon name="monitor" :size="14" /> {{ targetName }}
         <span class="ll-tag" :class="pathClass">{{ pathTag }}</span>
@@ -116,11 +132,11 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <!-- 重连中 -->
       <div v-else-if="state.sessionState === 'reconnecting'" class="ld-sess-overlay">
         <div class="ld-sess-bigicon is-warn"><Icon name="refresh" :size="30" /></div>
-        <div class="ld-sess-title" style="font-size:18px">重连中 ({{ retryAttempt }}/5)…正在尝试 P2P 直连</div>
-        <div class="ld-sess-desc">QUIC 连接已中断，采用指数退避重连（1s / 2s / 4s / 8s）</div>
-        <div class="ld-sess-progress"><i :style="{ width: (retryAttempt / 5 * 100) + '%' }" /></div>
+        <div class="ld-sess-title" style="font-size:18px">重连中 ({{ Math.min(retryAttempt, maxAttempts) }}/{{ maxAttempts }})…正在尝试 P2P 直连</div>
+        <div class="ld-sess-desc">QUIC 连接已中断，采用指数退避重连（{{ waitLabel }}）</div>
+        <div class="ld-sess-progress"><i :style="{ width: (Math.min(retryAttempt, maxAttempts) / maxAttempts * 100) + '%' }" /></div>
         <div style="display:flex;gap:40px;font-size:12px;color:var(--ll-session-text-dim)">
-          <span>第 {{ retryAttempt }} 次尝试 · 下次重试 2 秒后</span><span>{{ retryAttempt }} / 5</span>
+          <span>第 {{ retryAttempt }} 次尝试 · 下次重试 {{ nextWait }} 秒后</span><span>{{ Math.min(retryAttempt, maxAttempts) }} / {{ maxAttempts }}</span>
         </div>
         <div class="ld-sess-actions">
           <button class="ll-btn ll-btn--primary" @click="retryNow"><Icon name="refresh" :size="14" /> 立即重试</button>

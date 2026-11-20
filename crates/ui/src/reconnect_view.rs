@@ -39,6 +39,37 @@ pub fn view_of(sched: &ReconnectScheduler) -> Option<ReconnectView> {
     })
 }
 
+/// 完整重连退避计划（P1.2「会话命令面」：喂 `Session.vue` 重连浮层的真实数据，
+/// 替代前端硬编码的 `2/5` 计数与 `1s/2s/4s/8s` 文案）。
+///
+/// 由调度策略一次性算出，纯逻辑可离线单测。`waits` 是各次重试前应等待的秒数组
+/// （默认 1/2/4/8/16），`label` 给状态栏/浮层直接展示。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReconnectSchedule {
+    /// 最多重试次数（默认 5）。
+    pub max_attempts: u32,
+    /// 第 N 次重试前应等待的秒数（N 从 1 起，长度 = `max_attempts`）。
+    pub waits: Vec<u64>,
+    /// 展示文案（中文，如「指数退避 1s/2s/4s/8s/16s · 最多 5 次」）。
+    pub label: String,
+}
+
+/// 由调度器策略出**完整退避计划**（纯查询，不推进）。
+pub fn schedule_of(sched: &ReconnectScheduler) -> ReconnectSchedule {
+    let policy = sched.policy();
+    let waits: Vec<u64> = policy.schedule().iter().map(|d| d.as_secs()).collect();
+    let label = format!(
+        "指数退避 {} · 最多 {} 次",
+        waits.iter().map(|s| format!("{s}s")).collect::<Vec<_>>().join("/"),
+        policy.max_attempts,
+    );
+    ReconnectSchedule {
+        max_attempts: policy.max_attempts,
+        waits,
+        label,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +109,26 @@ mod tests {
         assert_eq!(v.max_attempts, 3);
         assert_eq!(v.attempt, 1);
         assert_eq!(v.wait_secs, 1);
+    }
+
+    #[test]
+    fn schedule_lists_full_backoff_plan() {
+        // P1.2：完整退避计划（默认 1/2/4/8/16 ×5），喂 Session.vue 重连浮层。
+        let s = ReconnectScheduler::default_policy();
+        let sc = schedule_of(&s);
+        assert_eq!(sc.max_attempts, 5);
+        assert_eq!(sc.waits, vec![1, 2, 4, 8, 16], "指数退避序列（FR-05.4）");
+        assert!(sc.label.contains("1s/2s/4s/8s/16s"), "文案含完整序列: {}", sc.label);
+
+        // 自定义策略跟着变。
+        let p = BackoffPolicy {
+            base: std::time::Duration::from_secs(2),
+            factor: 2,
+            max_attempts: 3,
+        };
+        let s2 = ReconnectScheduler::new(p);
+        let sc2 = schedule_of(&s2);
+        assert_eq!(sc2.waits, vec![2, 4, 8]);
+        assert_eq!(sc2.max_attempts, 3);
     }
 }

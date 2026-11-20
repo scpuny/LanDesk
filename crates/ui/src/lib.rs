@@ -19,9 +19,9 @@ pub mod reconnect_view;
 pub mod status;
 
 pub use config_store::{ConfigStore, StoreError, default_config_path};
-pub use devices::{device_rows, DeviceRow};
-pub use plan::{decide_path, PathDecision};
-pub use reconnect_view::{ReconnectView, view_of};
+pub use devices::{device_rows, DeviceRow, DeviceTable, now_secs};
+pub use plan::{decide_path, PathDecision, PathDecisionView};
+pub use reconnect_view::{ReconnectSchedule, ReconnectView, schedule_of, view_of};
 pub use status::{StatusBarModel, conn_mode_label, encoder_label, state_label};
 
 // ---------- 命令内核便捷 re-export（Tauri 壳只依赖 `landesk-ui` 即可取到全部业务类型）----------
@@ -31,5 +31,6 @@ pub use landesk_core::events::CoreEvent;
 pub use landesk_core::reconnect::{BackoffPolicy, ReconnectScheduler};
 pub use landesk_core::SessionState;
 pub use mdns::OnlineDevice;
+pub use mdns::Listener;
 pub use quic_link::ConnMode;
 
