@@ -13,9 +13,22 @@ pub mod commands;
 
 // ---------- Tauri 本体（仅 feature `tauri` 时编译；离线 vendor 不含 tauri）----------
 
+/// 会话独立 OS 窗体（label "session"，decorations:false 自绘）发起请求：
+/// 主窗体调 `session_window_open` 时写入 `AppState.session_launch`，会话窗体装载后
+/// 调 `session_window_target` 取目标；同一会话窗已开着时经 `session://open` 事件切目标。
+/// [`landesk_ui::SessionTargetView`] 已 `Serialize`（camelCase），与前端 `SessionTarget` 对齐。
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLaunchPayload {
+    pub target: Option<landesk_ui::SessionTargetView>,
+    pub path: Option<String>,
+}
+
 /// 共享状态（`tauri::State`）：状态栏快照（FR-09.3）+ 设备在线表（P1.1 下沉，FR-01.2/01.4）
 /// + 日志环形缓冲（P2.7，矩阵 §7.5，喂日志页查询/清空）
-/// + 会话管理器（P2 遗留 ①，矩阵 §7.5，喂会话建立/键鼠/剪贴板/断开命令）。
+/// + 会话管理器（P2 遗留 ①，矩阵 §7.5，喂会话建立/键鼠/剪贴板/断开命令）
+/// + 会话窗发起请求（独立 OS 窗体，喂 `session_window_open`/`session_window_target`）。
 ///
 /// `devices` 用 `Arc<Mutex<DeviceTable>>`：后台任务驱动 mDNS 监听器并把在线表快照镜像进来，
 /// `device_list` 命令（无入参）读它出剪枝+排序行——对齐 `apps/ui-server` 的 `/api/devices`。
@@ -31,6 +44,8 @@ pub mod state {
         pub devices: std::sync::Arc<std::sync::Mutex<DeviceTable>>,
         pub ring: std::sync::Arc<std::sync::Mutex<LogRing>>,
         pub session: std::sync::Arc<tokio::sync::Mutex<SessionManager>>,
+        /// 会话窗发起请求（`session_window_open` 写、`session_window_target` 读）。
+        pub session_launch: std::sync::Mutex<Option<crate::SessionLaunchPayload>>,
     }
 }
 
@@ -275,6 +290,65 @@ fn window_close(window: tauri::Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+// ---------- 会话独立 OS 窗体（custom 窗体，完整 最小化/最大化/关闭）----------
+// 主窗体发起远程控制/连接时调 `session_window_open`：写入 `session_launch` 目标，
+// 按需创建/复用 label "session" 的独立窗体（`decorations:false` 自绘）并送达目标；
+// 同一会话窗已开着时经 `session://open` 事件切换目标。会话窗装载后调 `session_window_target`
+// 取首帧目标（`SessionTargetView` camelCase，与前端 `SessionTarget` 对齐）。
+
+/// 发起一次会话：写目标进 `session_launch`，然后**复用或创建** label "session" 的独立 OS 窗体。
+/// - 已存在 → `show()`+`set_focus()` 并把新目标 `emit` 成 `session://open`（同一窗切目标）。
+/// - 不存在 → `WebviewWindowBuilder` 建 `session.html`（自绘 custom 窗体），`target` 经
+///   `session_window_target` 取回（目标在 build 前已写入 `session_launch`）。
+/// `target` 可空（会话窗内手动连）；`path` 为连接方式（inner/p2p/relay）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+async fn session_window_open(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, state::AppState>,
+    target: Option<landesk_ui::SessionTargetView>,
+    path: Option<String>,
+) -> Result<(), String> {
+    let payload = SessionLaunchPayload { target: target.clone(), path };
+    *state.session_launch.lock().unwrap() = Some(payload.clone());
+
+    // 复用已存在的会话窗：显化 + 聚焦 + 送达新目标（同一会话窗切设备）。
+    // `get_webview_window` 来自 `Manager` 扩展（`AppHandle` 已实现）；`emit` 来自 `Emitter`。
+    use tauri::Emitter;
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("session") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = app.emit("session://open", &payload);
+        return Ok(());
+    }
+
+    // 首开：建独立 OS 窗体（decorations:false 自绘，与主窗同风格；完整三键由前端画）。
+    use std::path::PathBuf;
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "session",
+        tauri::WebviewUrl::App(PathBuf::from("session.html")),
+    )
+    .title("LanDesk · 远程会话")
+    .inner_size(1120.0, 720.0)
+    .min_inner_size(720.0, 480.0)
+    .decorations(false)
+    .center()
+    .visible(true)
+    .build()
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// 取当前会话窗发起目标（会话窗体装载首帧读一次）。恒出 [`SessionLaunchPayload`]
+/// （`target`/`path` 可为 `None` = 会话窗内手动连）；前端读 `payload.target` 区分有无目标。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn session_window_target(state: tauri::State<'_, state::AppState>) -> SessionLaunchPayload {
+    state.session_launch.lock().unwrap().clone().unwrap_or_default()
+}
+
 /// 构建并运行 Tauri app（feature `tauri`；需 Tauri CLI + GUI 系统依赖）。
 #[cfg(feature = "tauri")]
 pub fn run() {
@@ -348,6 +422,7 @@ pub fn run() {
             devices,
             ring,
             session,
+            session_launch: std::sync::Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             config_load_or_init,
@@ -367,7 +442,9 @@ pub fn run() {
             window_platform,
             window_toggle_maximize,
             window_minimize,
-            window_close
+            window_close,
+            session_window_open,
+            session_window_target
         ])
         .run(tauri::generate_context!())
         .expect("tauri app 启动");

@@ -240,6 +240,41 @@ export const landesk = {
     return '/api/session/video'
   },
 
+  // ---------- 会话独立 OS 窗体（custom 窗体，完整 最小化/最大化/关闭）----------
+  // 发起远程控制/连接时由主窗体调 `sessionWindowOpen`：后端建/聚焦 label "session" 的
+  // 独立窗体并送达目标；会话窗体自身装载时 `sessionWindowTarget` 取目标、
+  // `sessionWindowListen` 订阅「再次发起」事件（同一会话窗已开着时切目标）。
+  // 浏览器轨（ui-server REST 无 OS 窗概念）：`sessionWindowOpen` no-op（浏览器预览走单页
+  // session 视图，由 `useSessionWindow` 分流），`sessionWindowTarget`/`Listen` 回默认。
+
+  /** Tauri：建/聚焦独立会话 OS 窗体并送达目标。浏览器轨 no-op。 */
+  sessionWindowOpen(target: { name: string; id: string; res?: string } | null, path?: string): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('session_window_open', { target, path: path ?? null })
+      : Promise.resolve()
+  },
+
+  /** Tauri：取当前会话窗目标（会话窗体装载时首帧）。出完整 payload（`target` + `path`）。
+   *  浏览器轨回 `{ target: null, path: null }`。 */
+  sessionWindowTarget(): Promise<{ target: { name: string; id: string; res?: string } | null; path: string | null }> {
+    return isTauri()
+      ? tauriInvoke<{ target: { name: string; id: string; res?: string } | null; path: string | null }>('session_window_target')
+      : Promise.resolve({ target: null, path: null })
+  },
+
+  /** Tauri：订阅 `session://open` 事件（同一会话窗已开时切换目标），返回解绑函数。
+   *  浏览器轨返回 `Promise.resolve(() => {})`（no-op 解绑）。 */
+  sessionWindowListen(
+    onTarget: (t: { target: { name: string; id: string; res?: string } | null; path: string | null }) => void,
+  ): Promise<() => void> {
+    if (!isTauri()) return Promise.resolve(() => {})
+    // 会话窗体自身的 Tauri 事件通道（withGlobalTauri 注入 `__TAURI__.event.listen`）。
+    const listen = window.__TAURI__?.event?.listen
+    if (!listen) return Promise.resolve(() => {})
+    return listen('session://open', (ev) => onTarget(ev.payload as { target: { name: string; id: string; res?: string } | null; path: string | null }))
+      .catch(() => () => {})
+  },
+
   // ---------- 自绘主窗体（去系统标题栏，跨平台窗口控制）----------
   // `decorations:false`（Windows/Linux）或 `titleBarStyle:overlay`（macOS 保留交通灯）下，
   // 系统不再画窗口三键，改由前端 TitleBar 自绘按钮调这些命令。平台分流：
