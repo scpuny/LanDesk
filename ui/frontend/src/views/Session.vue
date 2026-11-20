@@ -5,13 +5,14 @@
 import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
-import type { SessionState, ConnMode, ControlAction } from '../types/index'
+import type { SessionState, ConnMode, ControlAction, VideoFrameMsg } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
 const { state, navigate, toast, confirm } = useUi()
 const {
   reconnectPlan, loadReconnectPlan,
   isLive, liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
+  startVideoStream, stopVideoStream,
 } = useLanDesk()
 
 // 退避计划（后端下发；非 live 用默认预览序列 1/2/4/8/16s · 最多 5 次）。
@@ -112,6 +113,102 @@ function onToolDisplay() {
   toast('已切换到主显示器', 'info')
 }
 
+// ---------- 视频数据面（P2 遗留 ②）：live 运行态 WebCodecs 解码 → canvas 渲染 ----------
+// 画面帧通路（与 useLanDesk.startVideoStream 配套）：受控端 capture→encode→`VideoDgram` 分片
+// →QUIC datagram→控制端 `JitterBuffer` 重组→宿主逐帧送达（Tauri poll / 浏览器 SSE）→
+// WebCodecs `VideoDecoder`（H.264）解码→`<canvas>` 渲染。非 live 不启用（演示态走渐变底）。
+const canvasEl = ref<HTMLCanvasElement | null>(null)
+let videoStop: (() => void) | null = null   // 画面流 stop 句柄（useLanDesk 提供）
+let decoder: VideoDecoder | null = null     // WebCodecs 解码器（惰性配置）
+let decoderReady = false                     // 当前 codec 会话是否已 configure
+let baseTs = 0                               // 帧时间戳基线（ms，~30fps 递增）
+
+/** base64 → Uint8Array（`EncodedVideoChunk.data` 需 `ArrayBufferView`）。 */
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/** 惰性配置 H.264 `VideoDecoder`（首帧时按 canvas 内禀尺寸）。
+ *  输出回调把解码帧画到 canvas 并 `close()` 释放帧内存；不支持 / 配置失败回 `false`。 */
+function ensureDecoder(): boolean {
+  if (decoderReady && decoder) return true
+  const canvas = canvasEl.value
+  if (!canvas || typeof VideoDecoder === 'undefined') return false
+  const w = canvas.width || 1280
+  const h = canvas.height || 720
+  try {
+    decoder = new VideoDecoder({
+      output: (frame: VideoFrame) => {
+        // 重新读 live ref，避免画到已卸载的旧 canvas 元素。
+        const c = canvasEl.value
+        if (c) {
+          const ctx = c.getContext('2d')
+          if (ctx) ctx.drawImage(frame, 0, 0, c.width || w, c.height || h)
+        }
+        frame.close()   // 已 draw 完，归还 WebCodecs 帧内存
+      },
+      error: (e: DOMException) => {
+        stopVideoDecoder()   // 解码器错误：复位，等下一 IDR 起帧
+        console.warn('[LanDesk] VideoDecoder error:', e.message)
+      },
+    })
+    decoder.configure({
+      codec: 'avc1.42c01f',      // H.264 baseline（PlaceholderEncoder 产出的裸 NALU 走此档）
+      codedWidth: w,
+      codedHeight: h,
+      optimizeForLatency: true,
+    })
+    decoderReady = true
+    baseTs = 0
+    return true
+  } catch {
+    stopVideoDecoder()
+    return false
+  }
+}
+
+/** 收一帧（SSE / poll 回调）：base64 → `EncodedVideoChunk` → `decode`。
+ *  仅 live 运行态处理；IDR 关键帧以 `type:'key'` 喂入（WebCodecs 据此重建解码上下文）。 */
+function onVideoFrame(f: VideoFrameMsg): void {
+  if (!isLive.value || state.sessionState !== 'running') return
+  if (!ensureDecoder()) return
+  if (!decoder || decoder.state === 'closed') return
+  const data = b64ToBytes(f.nalu)
+  const chunk = new EncodedVideoChunk({
+    type: f.isIdr ? 'key' : 'delta',
+    timestamp: baseTs,
+    data: data.buffer as ArrayBuffer,
+  })
+  baseTs += 33   // ~30fps
+  decoder.decode(chunk)
+}
+
+/** 复位 + 关闭解码器（会话离开运行态 / 卸载时调，幂等）。 */
+function stopVideoDecoder(): void {
+  if (decoder) {
+    try { decoder.flush() } catch { /* ignore */ }
+    try { decoder.close() } catch { /* ignore */ }
+    decoder = null
+  }
+  decoderReady = false
+  baseTs = 0
+}
+
+/** 停画面流（停传输 + 关解码器）。 */
+function stopVideo(): void {
+  if (videoStop) { videoStop(); videoStop = null }
+  stopVideoDecoder()
+}
+
+// live 运行态起画面流，离开运行态（断开 / 鉴权失败 / 关闭）停；幂等。
+watch(() => state.sessionState, (s) => {
+  if (s === 'running' && isLive.value) videoStop = startVideoStream(onVideoFrame)
+  else stopVideo()
+})
+
 // live：后端会话状态快照 → 本地 `state`（状态机 + 目标 + 连接方式 + 度量），驱动顶部标签 + 底部状态栏。
 // 非 live 时 `liveSession` 恒 null，watcher 不写 `state`（演示路径保留）。
 watch(liveSession, (snap) => {
@@ -136,7 +233,7 @@ onMounted(async () => {
   // live：拉当前会话状态快照（未连 = idle，据此渲染顶部标签 + 底部状态栏）。
   await loadSessionStatus()
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo() })
 </script>
 
 <template>
@@ -168,6 +265,16 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <!-- 运行态：铺满画面 + 悬浮工具栏 + 降级提示 -->
       <template v-if="state.sessionState === 'running'">
         <div class="ld-sess-canvas__bg" style="background:radial-gradient(ellipse at 60% 40%, #3a5a7a 0%, #1d3040 45%, #0a1018 100%)" />
+        <!-- P2② 视频数据面：live 且运行态时 WebCodecs 解码画面渲染到此 canvas（复用 __bg 定位，铺满）；
+             非 live（演示预览）不渲染，保留渐变底。canvas 内禀 1280×720，CSS object-fit: contain 自适应。 -->
+        <canvas
+          v-if="isLive && liveSession?.stateCode === 'running'"
+          ref="canvasEl"
+          class="ld-sess-canvas__bg"
+          width="1280"
+          height="720"
+          style="background:#000;z-index:1"
+        />
         <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · 自适应画质 · 60fps</div>
         <div style="position:absolute;top:14px;right:16px;font-size:12px;color:#e8edf5;opacity:.8;display:flex;align-items:center;gap:6px"><Icon name="shield" :size="13" /> QUIC + AES-256-GCM 加密通话</div>
         <div class="ld-sess-warnbar" v-if="autoHideHint">

@@ -114,6 +114,23 @@ export interface SessionResp {
   error?: string | null
 }
 
+// ---------- 视频数据面（P2 遗留 ②，矩阵 §7.5「画面」，对齐 `ui::video::VideoFrameMsg`）----------
+/** 视频画面帧（对齐 `ui::video::VideoFrameMsg`，`camelCase` 序列化）。
+ *  `nalu` 为 base64 编码的裸 H.264 NALU 字节（含 Annex-B 起始码 `00 00 00 01`）；
+ *  `isIdr` 供前端在首帧 / 重连后 flush 解码器（WebCodecs `VideoDecoder`）。 */
+export interface VideoFrameMsg {
+  /** 帧序号（u16 循环空间，`seq` 溢出回绕）。 */
+  seq: number
+  /** NALU 类型（`lp::datagram::NaluKind` u8：`IdrWithSpsPps`/`PFrame`/`SpsPps`…）。 */
+  kind: number
+  /** 视频 Datagram flags（`FLAG_FIRST`/`FLAG_STALE_DROP`，保留透传）。 */
+  flags: number
+  /** 完整 NALU 字节（base64 编码，RFC 4648）。 */
+  nalu: string
+  /** 是否 IDR 关键帧（前端据此 flush 解码器 + 起帧）。 */
+  isIdr: boolean
+}
+
 /** 日志级别 */
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG'
 export type LogFilter = LogLevel | 'ALL'
