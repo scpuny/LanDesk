@@ -14,12 +14,13 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    # pre-release = 发布候选分支：从 dev 切出后必须过完 CI，才允许打 tag 发布
+    branches: [main, dev, pre-release]
     paths-ignore:
       - "docs/**"
       - "README.md"
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, pre-release]
 
 # 同分支重复推送时取消旧 run，节省额度
 concurrency:
