@@ -235,6 +235,46 @@ fn session_video_poll(state: tauri::State<'_, state::AppState>) -> Vec<landesk_u
     }
 }
 
+// ---------- 自绘主窗体窗口控制（去系统标题栏后由前端 TitleBar 驱动）----------
+// `decorations:false`（Windows/Linux）/ `titleBarStyle:overlay`（macOS 保留交通灯）下，
+// 系统不再画窗口三键，改由前端自绘按钮调这些命令。macOS 交通灯是系统原生绘制
+// （`decorations:true`），前端**不画**三键，仅把左侧留出交通灯宽度——见 `window_platform`。
+
+/// 当前平台（`"macos"` / `"windows"` / `"linux"`，供前端分流是否自绘窗口控制按钮）。
+/// 用 `std::env::consts::OS`（编译期目标 OS，非宿主 OS——Tauri 桌面壳在哪个平台编译就哪个 OS）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn window_platform() -> &'static str {
+    std::env::consts::OS
+}
+
+/// 切换最大化 / 还原（双击标题栏拖拽区由 Tauri 自动处理；前端最大化按钮调本命令）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::Window) -> Result<bool, String> {
+    let maximized = window.is_maximized().map_err(|e| e.to_string())?;
+    if maximized {
+        window.unmaximize().map_err(|e| e.to_string())?;
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+    }
+    Ok(!maximized)
+}
+
+/// 最小化（前端最小化按钮调）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn window_minimize(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// 关闭窗口（前端关闭按钮调；等价系统标题栏 ×，Tauri 收尾清理）。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn window_close(window: tauri::Window) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
 /// 构建并运行 Tauri app（feature `tauri`；需 Tauri CLI + GUI 系统依赖）。
 #[cfg(feature = "tauri")]
 pub fn run() {
@@ -279,14 +319,22 @@ pub fn run() {
     // 会话管理器（P2 遗留 ①）：信任任意证书的 QUIC 客户端（LAN 内网信任域，FR-01），
     // `insecure_default` 自动装 quinn 内置 ring provider（壳不必直接依赖 quinn/ring）。
     // 跨异步 `#[tauri::command]` 用 tokio Mutex 串行化。
+    //
+    // **须在 async runtime 内创建**：quinn `Endpoint::client()` 会向 current runtime
+    // `spawn` 一个长期 UDP 驱动任务，主线程同步调用会 `no async runtime found` panic
+    // （窗口根本起不来）。包进 `tauri::async_runtime::block_on`（Tauri 全局 tokio 运行时，
+    // `RUNTIME.get_or_init` 单例，进程存活期间一直跑）——驱动任务随进程生命周期运行。
+    // `SessionManager::new` 本身同步，放进 immediate future 即可。
     let session: std::sync::Arc<tokio::sync::Mutex<landesk_ui::SessionManager>> =
         Arc::new(tokio::sync::Mutex::new(
-            landesk_ui::SessionManager::new(
-                landesk_ui::QuicClient::insecure_default(
-                    "0.0.0.0:0".parse().expect("0.0.0.0:0"),
+            tauri::async_runtime::block_on(async {
+                landesk_ui::SessionManager::new(
+                    landesk_ui::QuicClient::insecure_default(
+                        "0.0.0.0:0".parse().expect("0.0.0.0:0"),
+                    )
+                    .expect("quic client init"),
                 )
-                .expect("quic client init"),
-            ),
+            }),
         ));
 
     // 最小 `tracing` 订阅器：把事件捕获进 `ring`（离线安全——只依赖壳 lock 里已传的
@@ -315,7 +363,11 @@ pub fn run() {
             session_send_control,
             session_status,
             session_close,
-            session_video_poll
+            session_video_poll,
+            window_platform,
+            window_toggle_maximize,
+            window_minimize,
+            window_close
         ])
         .run(tauri::generate_context!())
         .expect("tauri app 启动");

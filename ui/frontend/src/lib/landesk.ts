@@ -38,6 +38,12 @@ function isTauri(): boolean {
     !!window.__TAURI__?.core?.invoke
 }
 
+/** 当前是否桌面（Tauri）宿主——同步判定（读 `window.__TAURI__`）。
+ *  自绘窗口控制按钮仅在桌面宿主有意义（浏览器预览无窗口可控，隐藏按钮 + 拖拽区 no-op）。 */
+export function isDesktopHost(): boolean {
+  return isTauri()
+}
+
 /** 探测当前宿主是否有可用后端（决定 live vs mock 走哪条轨）。
  *  - Tauri 宿主：`withGlobalTauri` 注入的 `window.__TAURI__.core.invoke` 在 → 直接 live。
  *  - 浏览器宿主：显式注入 `window.__LANDesk_live__===true`（如嵌入方 / index.html）→ live；
@@ -233,6 +239,54 @@ export const landesk = {
   sessionVideoStreamUrl(): string {
     return '/api/session/video'
   },
+
+  // ---------- 自绘主窗体（去系统标题栏，跨平台窗口控制）----------
+  // `decorations:false`（Windows/Linux）或 `titleBarStyle:overlay`（macOS 保留交通灯）下，
+  // 系统不再画窗口三键，改由前端 TitleBar 自绘按钮调这些命令。平台分流：
+  //  - Tauri 桌面：`window_platform`（壳读 `std::env::consts::OS`）出当前目标 OS；窗口控制走 `invoke`。
+  //  - 浏览器预览：`navigator` 启发式判平台；窗口控制 no-op（浏览器无自绘窗口可控制）。
+
+  /** 当前目标平台（`'macos' | 'windows' | 'linux'`）。
+   *  Tauri 轨走 `window_platform` 命令（编译期目标 OS）；浏览器轨用 `navigator` 启发式兜底
+   *  （`navigator.platform` 已废弃，仅作预览态判 macOS/Windows/Linux，桌面壳恒走 Tauri 轨）。 */
+  platform(): Promise<'macos' | 'windows' | 'linux'> {
+    if (isTauri()) {
+      return tauriInvoke<'macos' | 'windows' | 'linux'>('window_platform')
+    }
+    return Promise.resolve(detectBrowserPlatform())
+  },
+
+  /** 切换最大化 / 还原（返回是否已最大化）。浏览器轨 no-op（返 `false`）。 */
+  windowToggleMaximize(): Promise<boolean> {
+    return isTauri()
+      ? tauriInvoke<boolean>('window_toggle_maximize')
+      : Promise.resolve(false)
+  },
+
+  /** 最小化。浏览器轨 no-op。 */
+  windowMinimize(): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('window_minimize')
+      : Promise.resolve()
+  },
+
+  /** 关闭窗口。浏览器轨 no-op（预览态不销毁宿主）。 */
+  windowClose(): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('window_close')
+      : Promise.resolve()
+  },
+}
+
+/** 浏览器宿主（非 Tauri）平台启发式：`navigator.platform` / `userAgent` 判 macOS/Windows/Linux。
+ *  仅作预览态兜底（桌面壳恒走 Tauri 轨的 `window_platform`），不保证精确——
+ *  浏览器里窗口控制按钮本就 no-op，平台只影响「是否画按钮」的预览观感。 */
+function detectBrowserPlatform(): 'macos' | 'windows' | 'linux' {
+  if (typeof navigator === 'undefined') return 'linux'
+  const ua = `${navigator.userAgent} ${navigator.platform}`.toLowerCase()
+  if (ua.includes('mac') || ua.includes('darwin')) return 'macos'
+  if (ua.includes('win')) return 'windows'
+  return 'linux'
 }
 
 /** 后端 `ui::LogLine` 序列化形状（`t` 为 epoch 微秒 `number`，`mod` 键名；camelCase）。 */

@@ -35,7 +35,8 @@
   display: flex;
   align-items: center;
   gap: var(--ll-space-5);
-  padding: 0 var(--ll-space-8);
+  /* 左 32 / 右 0：窗口三键贴右上角（对齐 Windows 标题栏习惯）；macOS 用 .ld-topbar--mac 覆盖左 padding。 */
+  padding: 0 0 0 var(--ll-space-8);
   background: var(--ll-color-bg);
   border-bottom: 1px solid var(--ll-color-border);
 }
@@ -44,6 +45,9 @@
 .ld-topbar__sub { font-size: var(--ll-fs-sm); color: var(--ll-color-text-tertiary); }
 .ld-topbar__spacer { flex: 1; }
 .ld-topbar__actions { display: flex; align-items: center; gap: var(--ll-space-2); }
+/* 自绘主窗体 macOS（交通灯 overlay）：顶栏左侧留白避开原生交通灯（三键宽约 78px）。
+   Win/Linux（decorations:false）不套此类 —— 窗口三键在右侧，左侧无系统元素。 */
+.ld-topbar--mac { padding-left: 80px; }
 .ld-icon-btn {
   width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: var(--ll-radius-sm); background: transparent; color: var(--ll-color-text-secondary);
@@ -347,9 +351,13 @@
 }
 .ld-sess-top {
   height: 48px; flex: none; display: flex; align-items: center; gap: var(--ll-space-3);
-  padding: 0 var(--ll-space-4); background: var(--ll-session-chrome);
+  /* 左 16 / 右 0：窗口三键贴右上角（对齐 Windows 标题栏习惯）。 */
+  padding: 0 0 0 var(--ll-space-4); background: var(--ll-session-chrome);
   border-bottom: 1px solid var(--ll-session-chrome-strong); z-index: 2;
 }
+/* 自绘主窗体 macOS（交通灯 overlay）：会话顶栏左侧留白避开原生交通灯（三键宽约 78px）。
+   Win/Linux（decorations:false）不套此类 —— 窗口三键在右侧。 */
+.ld-sess-top--mac { padding-left: 80px; }
 .ld-sess-state { display: inline-flex; align-items: center; gap: var(--ll-space-2); font-size: var(--ll-fs-sm); font-weight: var(--ll-fw-medium); }
 .ld-sess-target { display: inline-flex; align-items: center; gap: var(--ll-space-2); color: var(--ll-session-text-dim); font-size: var(--ll-fs-sm); }
 .ld-sess-top__spacer { flex: 1; }
