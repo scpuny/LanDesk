@@ -7,6 +7,7 @@ import { useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
 import { useWindowControls } from '../composables/useWindowControls'
 import { landesk, isDesktopHost } from '../lib/landesk'
+import { watchSessionCloseRequest } from '../composables/useSessionWindow'
 import type { SessionState, ConnMode, ControlAction, VideoFrameMsg } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 import WindowControls from '../components/layout/WindowControls.vue'
@@ -79,6 +80,33 @@ async function disconnect() {
   // live：走后端 `session_close`（优雅断开 QUIC + 状态机落 Closed）；非 live 仅本地演示。
   if (isLive.value) await closeSessionLive()
   setState('closed'); goBack(); toast('会话已断开', 'info')
+}
+
+// 关闭会话窗（macOS 红绿灯 ×、Win/Linux 自绘 ×）统一走二次确认：
+// 壳拦截原生 CloseRequested → 发 session://close-requested → 这里弹窗；确认后优雅断开并放行关窗。
+// 内部流程（断开/返回/去设置）仍直接 `windowClose()`（壳标记放行），不重复弹窗。
+let unwatchClose: (() => void) | null = null
+let closeConfirming = false
+async function confirmCloseWindow(): Promise<void> {
+  if (closeConfirming) return
+  closeConfirming = true
+  try {
+    const ok = await confirm({
+      title: '关闭会话窗口',
+      message: '关闭窗口将断开当前远程会话，确定要关闭吗？',
+      confirmText: '关闭窗口',
+      cancelText: '取消',
+    })
+    if (!ok) return
+    if (!props.standalone) { closeSession(); return } // 浏览器单页预览：切回主界面
+    if (isLive.value) {
+      // 关闭优先：后端断开失败也继续放行，避免窗口关不掉。
+      try { await closeSessionLive() } catch { /* ignore */ }
+    }
+    await landesk.sessionWindowCloseConfirmed()
+  } finally {
+    closeConfirming = false
+  }
 }
 async function verify() {
   if (!password.value) { toast('请输入临时密码', 'warning'); return }
@@ -452,10 +480,16 @@ watch(liveSession, (snap) => {
 let timer = null
 onMounted(async () => {
   loadReconnectPlan()
+  // 原生关闭请求（macOS 交通灯 ×）先弹确认，不直接关窗。
+  unwatchClose = watchSessionCloseRequest(() => { void confirmCloseWindow() })
   // live：拉当前会话状态快照（未连 = idle，据此渲染顶部标签 + 底部状态栏）。
   await loadSessionStatus()
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo(); stopMetrics() })
+onBeforeUnmount(() => {
+  if (unwatchClose) unwatchClose()
+  if (timer) clearInterval(timer)
+  stopVideo(); stopMetrics()
+})
 </script>
 
 <template>
@@ -489,7 +523,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); stopVideo(); stopMetric
         <button v-else-if="state.sessionState === 'authfailed'" class="ll-btn ll-btn--default ll-btn--sm" @click="closeSession">× 关闭会话</button>
       </div>
       <!-- Win/Linux 自绘三键（min/max/close）；macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
-      <WindowControls />
+      <WindowControls confirm-close @close="confirmCloseWindow" />
     </header>
 
     <!-- 画面区 -->

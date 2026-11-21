@@ -36,3 +36,12 @@ export function watchSessionOpen(onTarget: (t: { target: SessionTarget | null; p
   landesk.sessionWindowListen(onTarget).then((fn) => { un = fn }).catch(() => {})
   return () => { if (un) un() }
 }
+
+/** 监听会话窗原生关闭请求（macOS 交通灯 ×）：壳拦截后发本事件，会话页弹二次确认。
+ *  浏览器预览轨无 OS 窗 → no-op。返回解绑函数。 */
+export function watchSessionCloseRequest(onClose: () => void): () => void {
+  if (!isDesktopHost()) return () => {}
+  let un: (() => void) | undefined
+  landesk.sessionWindowListenClose(onClose).then((fn) => { un = fn }).catch(() => {})
+  return () => { if (un) un() }
+}

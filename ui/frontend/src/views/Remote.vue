@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 远程控制页（菜单置顶）：快速连接 + 本机设备码/临时密码 + 本机运行信息。
 // 从原 DeviceList 拆出「发起侧 + 本机信息」职责；「我的设备」页保留局域网设备列表（选择侧）。
-// 发起远程控制/一次性密码：live(Tauri) 打开独立会话 OS 窗体并带目标；非 live 浏览器预览走单页 session。
+// 发起远程控制：live(Tauri) 打开独立会话 OS 窗体并带目标；非 live 浏览器预览走单页 session。
+// 「一次性密码」不发起会话（由受控端生成），仅给出索取提示。
 import { ref, nextTick, onMounted } from 'vue'
 import { useUi, toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
@@ -22,8 +23,9 @@ function remoteControl() {
 function oneTimePassword() {
   const code = quickCode.value.replace(/\s/g, '')
   if (!code) { toast('请输入对方设备码', 'warning'); return }
-  toast('本次会话使用一次性临时密码', 'info')
-  launchSession({ name: code, id: code, res: '1920×1080' }, 'p2p')
+  // 一次性密码由受控端生成/持有（protocol.md），控制端不能凭本机密码直接开会话。
+  // 这里只提示用户向对方索取，不打开会话窗体；真正建连走「远程控制」+ 密码校验。
+  toast('一次性密码由对方设备生成，请向设备所有者索取后输入', 'info')
 }
 function copy(text: string, label = '已复制') {
   navigator.clipboard?.writeText(text).then(() => toast(label)).catch(() => toast(label))
