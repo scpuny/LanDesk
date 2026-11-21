@@ -6,13 +6,17 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { useUi, toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
-import { launchSession } from '../composables/useSessionWindow'
+import { launchSession, recentTargets, loadRecentTargets } from '../composables/useSessionWindow'
 import Icon from '../components/common/Icon.vue'
 
 const { navigate } = useUi()
 const { local, refreshTempPassword, loadLocal, config, saveConfig, isLive } = useLanDesk()
-const quickCode = ref('41C98B7E')
-const history = ['9D21 44AF', '77BE 0C13', 'DE53 2A90', 'B104 6F8D']
+const quickCode = ref('')
+/** 最近连接：本机真实发起过的目标（localStorage），按最近时间倒序。 */
+const history = recentTargets
+function formatCode(code: string): string {
+  return code.length === 8 ? `${code.slice(0, 4)} ${code.slice(4)}` : code
+}
 
 /** 发起远程控制：把设备码作为目标交给会话窗体（Tauri 独立 OS 窗 / 浏览器单页）。 */
 function remoteControl() {
@@ -59,7 +63,7 @@ async function commitName() {
 
 function cancelEditName() { editingName.value = false }
 
-onMounted(() => { loadLocal() })
+onMounted(() => { loadLocal(); loadRecentTargets() })
 </script>
 
 <template>
@@ -84,9 +88,10 @@ onMounted(() => { loadLocal() })
       </div>
       <div class="ld-recent">
         <span class="ld-recent__label">最近连接</span>
-        <button v-for="h in history" :key="h" class="ld-chip" @click="quickCode = h.replace(/\s/g,'')">
-          <Icon name="history" :size="12" /> {{ h }}
+        <button v-for="h in history" :key="h.code" class="ld-chip" :title="h.name" @click="quickCode = h.code">
+          <Icon name="history" :size="12" /> {{ formatCode(h.code) }}
         </button>
+        <span v-if="!history.length" class="ld-form-help">暂无连接记录</span>
       </div>
     </section>
 
