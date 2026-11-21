@@ -107,19 +107,19 @@ fn choose_path(
 }
 
 /// 本机信息（P2.7「本机信息 API」，矩阵 §7.5）：出 [`landesk_ui::LocalInfo`] 喂设备页左栏「本机卡」。
-/// 设备码/临时密码由宿主态派生（`device_code_from` 稳定摘要 + `gen_temp_password`），
-/// `mdns_advertising`/`online` 读壳内共享设备表是否非空（有在线设备 = 本机可达）。
+/// 设备码/临时密码由宿主态派生（`device_code_from` 稳定摘要 + `gen_temp_password`）。
+/// 本机在线态取自本机配置（mDNS 已启用 = 本机可被发现/连接）；共享设备表只记录
+/// “发现到哪些远端设备”，用它推断本机在线会在局域网没有其他设备时错误显示“离线”。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-fn local_info(state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
+fn local_info(_state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
     let store = landesk_ui::ConfigStore::new();
     let cfg = store.load_or_init()?;
     let device_code = landesk_ui::device_code_from(&cfg.device_name);
     let temp_password = landesk_ui::gen_temp_password();
-    // 编码能力未接数据面探测，保守空值；mDNS/在线态由设备表驱动。
-    let mut devices = state.devices.lock().unwrap();
-    let online = !devices.rows(landesk_ui::now_secs()).is_empty();
-    let mdns_advertising = online;
+    // 编码能力未接数据面探测，保守空值；mDNS/在线态均取本机配置。
+    let mdns_advertising = cfg.mdns_enabled;
+    let online = cfg.mdns_enabled;
     let info = commands::local_info(
         &store,
         &device_code,

@@ -156,7 +156,14 @@
   display: inline-flex; align-items: center; justify-content: center;
 }
 .ld-local__name { display: flex; align-items: center; gap: 6px; font-size: var(--ll-fs-lg); }
-.ld-local__edit { color: var(--ll-color-brand); cursor: pointer; }
+.ld-local__edit-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px; border: none; background: none; color: var(--ll-color-brand); cursor: pointer;
+}
+.ld-local__edit-btn:hover { color: var(--ll-color-brand-hover, var(--ll-color-brand)); }
+.ld-local__name-input {
+  width: 190px; height: 28px; padding: 0 8px; font-size: var(--ll-fs-lg); line-height: 1;
+}
 .ld-local__online {
   display: flex; align-items: center; gap: 6px; margin-top: 3px;
   font-size: var(--ll-fs-sm); color: var(--ll-color-success);

@@ -331,7 +331,8 @@ async fn main() {
             get(|State(ctx): State<Ctx>| async move {
                 let cfg = ctx.store.load_or_init().unwrap_or_default();
                 let mdns_advertising = ctx.listener.lock().unwrap().is_some();
-                let online = mdns_advertising;
+                // 本机在线态由本机配置决定；不能按远端设备表/发现结果推断本机是否在线。
+                let online = cfg.mdns_enabled;
                 let device_code = device_code_from(&cfg.device_name);
                 let temp_password = gen_temp_password();
                 let info = local_info_of(&cfg, &device_code, &temp_password, vec![], mdns_advertising, online);
