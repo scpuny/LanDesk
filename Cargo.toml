@@ -53,6 +53,8 @@ mdns-sd = "0.10"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 系统（本机机器名，GUI 配置页默认设备名）
+libc = "0.2"
 # 错误
 thiserror = "1"
 # CLI

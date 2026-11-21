@@ -39,6 +39,33 @@ pub fn default_config_path() -> PathBuf {
         .join("config.json")
 }
 
+/// 读取本机机器名（首次运行的默认设备名）。
+///
+/// - Windows：`COMPUTERNAME`（系统环境变量，无额外依赖）；
+/// - Unix（macOS/Linux）：`gethostname(2)`（vendor 已含 libc）。
+///
+/// 读不到返回 `None`——调用方保留空串，交给用户在设置页手填。
+fn detect_machine_name() -> Option<String> {
+    #[cfg(windows)]
+    {
+        std::env::var("COMPUTERNAME")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+    #[cfg(not(windows))]
+    {
+        let mut buf = [0_i8; 256];
+        // SAFETY: buf 是 256 字节可写栈缓冲，长度按容量传；成功时内核写入 NUL 结尾字符串。
+        if unsafe { libc::gethostname(buf.as_mut_ptr(), buf.len()) } != 0 {
+            return None;
+        }
+        let bytes: Vec<u8> = buf.iter().take_while(|&&b| b != 0).map(|&b| b as u8).collect();
+        let name = String::from_utf8_lossy(&bytes).trim().to_string();
+        if name.is_empty() { None } else { Some(name) }
+    }
+}
+
 /// 配置页读/写器（路径固定）。
 #[derive(Debug, Clone)]
 pub struct ConfigStore {
@@ -64,15 +91,29 @@ impl ConfigStore {
         &self.path
     }
 
-    /// 读配置；文件不存在 → 返回默认并**生成模板落盘**（§5.1 首次生成）。
+    /// 读配置；文件不存在 → 生成模板落盘（§5.1 首次生成）。
+    ///
+    /// 设备名为空（首次运行，或老配置从未填过）时用本机机器名回填并落盘——
+    /// 设置页与本机卡都直接读该字段，且设备码由它派生，空名会让各机器设备码相同。
+    /// 用户已改过的名称非空，不会被覆盖。
     pub fn load_or_init(&self) -> Result<Config, StoreError> {
-        if self.path.exists() {
-            Ok(Config::load_file(&self.path)?)
+        let mut dirty = !self.path.exists();
+        let mut c = if dirty {
+            Config::default()
         } else {
-            let c = Config::default();
-            c.save_file(&self.path)?;
-            Ok(c)
+            Config::load_file(&self.path)?
+        };
+        if c.device_name.trim().is_empty() {
+            if let Some(name) = detect_machine_name() {
+                // 设置页 maxlength=32；机器名超长时截断，避免前端展示被截而落盘超长。
+                c.device_name = name.chars().take(32).collect();
+                dirty = true;
+            }
         }
+        if dirty {
+            c.save_file(&self.path)?;
+        }
+        Ok(c)
     }
 
     /// 保存当前配置。
@@ -106,11 +147,32 @@ mod tests {
         let _ = std::fs::remove_file(&p);
         let store = ConfigStore::with_path(&p);
         let c = store.load_or_init().expect("init");
-        assert_eq!(c, Config::default(), "首次生成默认模板");
+        // 首次生成：默认模板 + 本机机器名回填（取不到机器名时保持空）。
+        let mut expected = Config::default();
+        if let Some(name) = detect_machine_name() {
+            expected.device_name = name.chars().take(32).collect();
+        }
+        assert_eq!(c, expected, "首次生成默认模板（设备名取本机机器名）");
         assert!(p.exists(), "模板已落盘");
         // 二次 load 走 exists 分支，仍一致。
         let c2 = store.load_or_init().expect("reload");
         assert_eq!(c2, c);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn load_or_init_keeps_user_edited_device_name() {
+        let p = tmp("edited.json");
+        let _ = std::fs::remove_file(&p);
+        let store = ConfigStore::with_path(&p);
+        store
+            .save(&Config {
+                device_name: "my-workstation".into(),
+                ..Default::default()
+            })
+            .expect("save edited name");
+        let c = store.load_or_init().expect("reload");
+        assert_eq!(c.device_name, "my-workstation", "用户改过的设备名不被机器名覆盖");
         let _ = std::fs::remove_file(&p);
     }
 
