@@ -1,17 +1,22 @@
 <script setup lang="ts">
 // 远程控制页（菜单置顶）：快速连接 + 本机设备码/临时密码 + 本机运行信息。
 // 从原 DeviceList 拆出「发起侧 + 本机信息」职责；「我的设备」页保留局域网设备列表（选择侧）。
-// 发起远程控制/一次性密码：live(Tauri) 打开独立会话 OS 窗体并带目标；非 live 浏览器预览走单页 session。
-import { ref, onMounted } from 'vue'
+// 发起远程控制：live(Tauri) 打开独立会话 OS 窗体并带目标；非 live 浏览器预览走单页 session。
+// 「一次性密码」不发起会话（由受控端生成），仅给出索取提示。
+import { ref, nextTick, onMounted } from 'vue'
 import { useUi, toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
-import { launchSession } from '../composables/useSessionWindow'
+import { launchSession, recentTargets, loadRecentTargets } from '../composables/useSessionWindow'
 import Icon from '../components/common/Icon.vue'
 
 const { navigate } = useUi()
-const { local, refreshTempPassword, loadLocal } = useLanDesk()
-const quickCode = ref('41C98B7E')
-const history = ['9D21 44AF', '77BE 0C13', 'DE53 2A90', 'B104 6F8D']
+const { local, refreshTempPassword, loadLocal, config, saveConfig, isLive } = useLanDesk()
+const quickCode = ref('')
+/** 最近连接：本机真实发起过的目标（localStorage），按最近时间倒序。 */
+const history = recentTargets
+function formatCode(code: string): string {
+  return code.length === 8 ? `${code.slice(0, 4)} ${code.slice(4)}` : code
+}
 
 /** 发起远程控制：把设备码作为目标交给会话窗体（Tauri 独立 OS 窗 / 浏览器单页）。 */
 function remoteControl() {
@@ -22,14 +27,43 @@ function remoteControl() {
 function oneTimePassword() {
   const code = quickCode.value.replace(/\s/g, '')
   if (!code) { toast('请输入对方设备码', 'warning'); return }
-  toast('本次会话使用一次性临时密码', 'info')
-  launchSession({ name: code, id: code, res: '1920×1080' }, 'p2p')
+  // 一次性密码由受控端生成/持有（protocol.md），控制端不能凭本机密码直接开会话。
+  // 这里只提示用户向对方索取，不打开会话窗体；真正建连走「远程控制」+ 密码校验。
+  toast('一次性密码由对方设备生成，请向设备所有者索取后输入', 'info')
 }
 function copy(text: string, label = '已复制') {
   navigator.clipboard?.writeText(text).then(() => toast(label)).catch(() => toast(label))
 }
 
-onMounted(() => { loadLocal() })
+// 本机设备名就地编辑（与设置页共用 config.device_name，保存后回读本机信息）
+const editingName = ref(false)
+const nameDraft = ref('')
+const nameInput = ref<HTMLInputElement | null>(null)
+
+function startEditName() {
+  nameDraft.value = local.name || config.device_name || ''
+  editingName.value = true
+  void nextTick(() => nameInput.value?.focus())
+}
+
+async function commitName() {
+  if (!editingName.value) return
+  editingName.value = false
+  const name = nameDraft.value.trim()
+  if (!name || name === local.name) return
+  if (isLive.value) {
+    config.device_name = name
+    await saveConfig()
+    await loadLocal()
+  } else {
+    local.name = name
+  }
+  toast('设备名称已保存', 'success')
+}
+
+function cancelEditName() { editingName.value = false }
+
+onMounted(() => { loadLocal(); loadRecentTargets() })
 </script>
 
 <template>
@@ -54,9 +88,10 @@ onMounted(() => { loadLocal() })
       </div>
       <div class="ld-recent">
         <span class="ld-recent__label">最近连接</span>
-        <button v-for="h in history" :key="h" class="ld-chip" @click="quickCode = h.replace(/\s/g,'')">
-          <Icon name="history" :size="12" /> {{ h }}
+        <button v-for="h in history" :key="h.code" class="ld-chip" :title="h.name" @click="quickCode = h.code">
+          <Icon name="history" :size="12" /> {{ formatCode(h.code) }}
         </button>
+        <span v-if="!history.length" class="ld-form-help">暂无连接记录</span>
       </div>
     </section>
 
@@ -69,8 +104,23 @@ onMounted(() => { loadLocal() })
             <span class="ld-local__ico"><Icon name="monitor" :size="19" /></span>
             <div>
               <div class="ld-card__title ld-local__name">
-                {{ local.name }}
-                <Icon name="edit" :size="13" class="ld-local__edit" />
+                <input
+                  v-if="editingName"
+                  ref="nameInput"
+                  v-model="nameDraft"
+                  class="ll-input ld-local__name-input"
+                  maxlength="32"
+                  placeholder="设备名称"
+                  @keyup.enter="commitName"
+                  @keyup.esc="cancelEditName"
+                  @blur="commitName"
+                />
+                <template v-else>
+                  {{ local.name }}
+                  <button class="ld-local__edit-btn" title="编辑设备名称" @click.stop="startEditName">
+                    <Icon name="edit" :size="13" />
+                  </button>
+                </template>
               </div>
               <div class="ld-local__online"><span class="ll-dot" :class="local.online ? 'll-dot--success' : ''" /> {{ local.online ? '在线 · 可被连接' : '离线' }}</div>
             </div>

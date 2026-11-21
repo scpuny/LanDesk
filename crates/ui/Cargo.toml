@@ -18,6 +18,8 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 # 剪贴板 SHA-256 校验（FR-07.2，`session::clip_sha256`；主仓 vendor 已含 0.10.9，离线安全）。
 sha2 = { workspace = true }
+# 本机机器名（首次运行默认设备名；main/vendor 已含 0.2.x，离线安全）。
+libc = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

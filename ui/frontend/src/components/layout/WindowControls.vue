@@ -7,9 +7,18 @@
 import { useWindowControls } from '../../composables/useWindowControls'
 import Icon from '../common/Icon.vue'
 
-defineProps<{ noMax?: boolean }>()
+const props = defineProps<{
+  noMax?: boolean
+  /** true = 关闭键交给父组件处理（如会话窗先弹二次确认），不直接关 OS 窗。 */
+  confirmClose?: boolean
+}>()
+const emit = defineEmits<{ close: [] }>()
 
 const { showControls, onMinimize, onMaximize, onClose } = useWindowControls()
+function onCloseClick(): void {
+  if (props.confirmClose) emit('close')
+  else onClose()
+}
 </script>
 
 <template>
@@ -20,7 +29,7 @@ const { showControls, onMinimize, onMaximize, onClose } = useWindowControls()
     <button v-if="!noMax" class="ld-win-ctrl__btn" title="最大化" aria-label="最大化 / 还原" @click="onMaximize">
       <Icon name="winMax" :size="13" />
     </button>
-    <button class="ld-win-ctrl__btn ld-win-ctrl__btn--close" title="关闭" aria-label="关闭" @click="onClose">
+    <button class="ld-win-ctrl__btn ld-win-ctrl__btn--close" title="关闭" aria-label="关闭" @click="onCloseClick">
       <Icon name="close" :size="14" />
     </button>
   </div>

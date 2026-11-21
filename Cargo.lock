@@ -896,6 +896,7 @@ version = "0.2.0"
 dependencies = [
  "ice",
  "landesk-core",
+ "libc",
  "lp",
  "mdns",
  "quic-link",

@@ -275,6 +275,22 @@ export const landesk = {
       .catch(() => () => {})
   },
 
+  /** Tauri：订阅会话窗原生关闭请求（macOS 红绿灯 × / 系统关闭）。壳先拦截关闭，
+   *  发本事件让会话页弹二次确认；前端确认后调 `sessionWindowCloseConfirmed()` 放行。 */
+  sessionWindowListenClose(onClose: () => void): Promise<() => void> {
+    if (!isTauri()) return Promise.resolve(() => {})
+    const listen = window.__TAURI__?.event?.listen
+    if (!listen) return Promise.resolve(() => {})
+    return listen('session://close-requested', () => onClose()).catch(() => () => {})
+  },
+
+  /** 二次确认通过后关闭会话窗（放开壳的关闭闸门）。浏览器轨 no-op。 */
+  sessionWindowCloseConfirmed(): Promise<void> {
+    return isTauri()
+      ? tauriInvoke<void>('session_window_close_confirmed')
+      : Promise.resolve()
+  },
+
   // ---------- 自绘主窗体（去系统标题栏，跨平台窗口控制）----------
   // `decorations:false`（Windows/Linux）或 `titleBarStyle:overlay`（macOS 保留交通灯）下，
   // 系统不再画窗口三键，改由前端 TitleBar 自绘按钮调这些命令。平台分流：

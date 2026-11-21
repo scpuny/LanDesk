@@ -2039,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "landesk-app"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "base64 0.22.1",
  "landesk-ui",
@@ -2080,6 +2080,7 @@ version = "0.2.0"
 dependencies = [
  "ice",
  "landesk-core",
+ "libc",
  "lp",
  "mdns",
  "quic-link",

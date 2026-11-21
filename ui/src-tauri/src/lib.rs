@@ -13,7 +13,7 @@ pub mod commands;
 
 // ---------- Tauri 本体（仅 feature `tauri` 时编译；离线 vendor 不含 tauri）----------
 
-/// 会话独立 OS 窗体（label "session"，decorations:false 自绘）发起请求：
+/// 会话独立 OS 窗体（label "session"；macOS 保留原生交通灯，Win/Linux 自绘三键）发起请求：
 /// 主窗体调 `session_window_open` 时写入 `AppState.session_launch`，会话窗体装载后
 /// 调 `session_window_target` 取目标；同一会话窗已开着时经 `session://open` 事件切目标。
 /// [`landesk_ui::SessionTargetView`] 已 `Serialize`（camelCase），与前端 `SessionTarget` 对齐。
@@ -46,6 +46,9 @@ pub mod state {
         pub session: std::sync::Arc<tokio::sync::Mutex<SessionManager>>,
         /// 会话窗发起请求（`session_window_open` 写、`session_window_target` 读）。
         pub session_launch: std::sync::Mutex<Option<crate::SessionLaunchPayload>>,
+        /// 会话窗关闭闸门：`true` = 本次关闭已获确认（或前端内部流程主动关），
+        /// `on_window_event(CloseRequested)` 放行；否则拦截并让前端弹二次确认。
+        pub session_allow_close: std::sync::atomic::AtomicBool,
     }
 }
 
@@ -107,19 +110,19 @@ fn choose_path(
 }
 
 /// 本机信息（P2.7「本机信息 API」，矩阵 §7.5）：出 [`landesk_ui::LocalInfo`] 喂设备页左栏「本机卡」。
-/// 设备码/临时密码由宿主态派生（`device_code_from` 稳定摘要 + `gen_temp_password`），
-/// `mdns_advertising`/`online` 读壳内共享设备表是否非空（有在线设备 = 本机可达）。
+/// 设备码/临时密码由宿主态派生（`device_code_from` 稳定摘要 + `gen_temp_password`）。
+/// 本机在线态取自本机配置（mDNS 已启用 = 本机可被发现/连接）；共享设备表只记录
+/// “发现到哪些远端设备”，用它推断本机在线会在局域网没有其他设备时错误显示“离线”。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-fn local_info(state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
+fn local_info(_state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
     let store = landesk_ui::ConfigStore::new();
     let cfg = store.load_or_init()?;
     let device_code = landesk_ui::device_code_from(&cfg.device_name);
     let temp_password = landesk_ui::gen_temp_password();
-    // 编码能力未接数据面探测，保守空值；mDNS/在线态由设备表驱动。
-    let mut devices = state.devices.lock().unwrap();
-    let online = !devices.rows(landesk_ui::now_secs()).is_empty();
-    let mdns_advertising = online;
+    // 编码能力未接数据面探测，保守空值；mDNS/在线态均取本机配置。
+    let mdns_advertising = cfg.mdns_enabled;
+    let online = cfg.mdns_enabled;
     let info = commands::local_info(
         &store,
         &device_code,
@@ -284,9 +287,14 @@ fn window_minimize(window: tauri::Window) -> Result<(), String> {
 }
 
 /// 关闭窗口（前端关闭按钮调；等价系统标题栏 ×，Tauri 收尾清理）。
+/// 会话窗（label "session"）经此命令关闭意味着前端已明确处理过关闭意图，
+/// 标记放行，避免 `CloseRequested` 拦截再弹一次确认；原生交通灯不调本命令，仍走确认。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-fn window_close(window: tauri::Window) -> Result<(), String> {
+fn window_close(window: tauri::Window, state: tauri::State<'_, state::AppState>) -> Result<(), String> {
+    if window.label() == "session" {
+        state.session_allow_close.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     window.close().map_err(|e| e.to_string())
 }
 
@@ -369,9 +377,10 @@ async fn session_window_open(
         return Ok(());
     }
 
-    // 首开：建独立 OS 窗体（decorations:false 自绘，与主窗同风格；完整三键由前端画）。
+    // 首开：macOS 保留原生标题栏 → 左上角交通灯（前端顶栏左侧留白避开）；
+    // Win/Linux 仍为无边框自绘窗（前端自绘 min/max/close）。两者顶栏拖拽区逻辑不变。
     use std::path::PathBuf;
-    tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "session",
         tauri::WebviewUrl::App(PathBuf::from("session.html")),
@@ -379,12 +388,38 @@ async fn session_window_open(
     .title("LanDesk · 远程会话")
     .inner_size(1120.0, 720.0)
     .min_inner_size(720.0, 480.0)
-    .decorations(false)
     .center()
-    .visible(true)
-    .build()
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    .visible(true);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .decorations(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
+    }
+
+    let win = builder.build().map_err(|e| e.to_string())?;
+
+    // 关闭闸门：原生关闭请求（macOS 红色交通灯）先拦截并通知会话窗弹二次确认；
+    // 前端确认后调 `session_window_close_confirmed` 放行，未确认则窗口保持打开。
+    let app_for_close = app.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            use tauri::{Emitter, Manager};
+            let st = app_for_close.state::<state::AppState>();
+            if st.session_allow_close.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return; // 已确认 / 前端内部流程主动关：直接放行
+            }
+            api.prevent_close();
+            let _ = app_for_close.emit_to("session", "session://close-requested", ());
+        }
+    });
+    Ok(())
 }
 
 /// 取当前会话窗发起目标（会话窗体装载首帧读一次）。恒出 [`SessionLaunchPayload`]
@@ -393,6 +428,22 @@ async fn session_window_open(
 #[tauri::command]
 fn session_window_target(state: tauri::State<'_, state::AppState>) -> SessionLaunchPayload {
     state.session_launch.lock().unwrap().clone().unwrap_or_default()
+}
+
+/// 会话窗二次确认通过后由前端调用：放开关闭闸门并关闭会话窗。
+/// 直接 `window.close()` 会再次进 `CloseRequested`，闸门已置位故放行。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn session_window_close_confirmed(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, state::AppState>,
+) -> Result<(), String> {
+    use tauri::Manager;
+    state.session_allow_close.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("session") {
+        w.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// 构建并运行 Tauri app（feature `tauri`；需 Tauri CLI + GUI 系统依赖）。
@@ -469,6 +520,7 @@ pub fn run() {
             ring,
             session,
             session_launch: std::sync::Mutex::new(None),
+            session_allow_close: std::sync::atomic::AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             config_load_or_init,
@@ -491,7 +543,8 @@ pub fn run() {
             window_close,
             screenshot_save,
             session_window_open,
-            session_window_target
+            session_window_target,
+            session_window_close_confirmed
         ])
         .run(tauri::generate_context!())
         .expect("tauri app 启动");
