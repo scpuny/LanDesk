@@ -60,9 +60,11 @@ mod tests {
 
     #[test]
     fn device_ad_uses_stable_code_and_config() {
-        let mut cfg = Config::default();
-        cfg.device_name = "devboard".into();
-        cfg.relay_enabled = true;
+        let cfg = Config {
+            device_name: "devboard".into(),
+            relay_enabled: true,
+            ..Default::default()
+        };
         let ad = device_ad_of(&cfg);
         assert_eq!(ad.name, "devboard");
         assert_eq!(ad.id, device_code_from("devboard"));
