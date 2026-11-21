@@ -516,7 +516,9 @@
 .ld-swatch i { flex: 1; }
 
 /* ---------------- 响应式 ---------------- */
-@media (max-width: 1180px) {
+/* 首页下方两卡（本机设备码 / 本机运行信息）在默认 980 窗口下保持一行；
+   内容区 = 窗口 - 侧栏 200 - 内边距 64，900 以下才收成单列，避免过早换行。 */
+@media (max-width: 900px) {
   .ld-device-columns { grid-template-columns: 1fr; }
   .ld-local-col { display: grid; grid-template-columns: 1fr 1fr; }
 }
