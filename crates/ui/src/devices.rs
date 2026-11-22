@@ -66,6 +66,16 @@ pub fn device_rows(devices: &mut Vec<OnlineDevice>, now: u64) -> Vec<DeviceRow> 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceTable {
     devices: Vec<OnlineDevice>,
+    /// 本机设备码（8 位 hex）。mDNS 会收到自己广播的实例，必须在入表时排除，
+    /// 否则「我的设备」里出现自己、点击连接必然失败（自己连自己 / 无受控服务）。
+    local_code: Option<String>,
+}
+
+impl DeviceTable {
+    /// 设置本机设备码用于过滤（宿主启动时按本机配置调用一次）。设置后对新快照生效。
+    pub fn set_local_code(&mut self, code: impl Into<String>) {
+        self.local_code = Some(code.into());
+    }
 }
 
 impl DeviceTable {
@@ -77,7 +87,11 @@ impl DeviceTable {
     /// 用监听器在线表快照**整体替换**本表（监听器已做去重 / upsert / 刷新 `last_seen`，
     /// 宿主每轮驱动后同步一次即可，是「镜像」语义）。
     pub fn apply_snapshot(&mut self, snapshot: Vec<OnlineDevice>) {
-        self.devices = snapshot;
+        // 过滤本机：mDNS 自己也收得到自己的宣告，连自己没有意义且必然失败。
+        self.devices = snapshot
+            .into_iter()
+            .filter(|d| self.local_code.as_deref().map(|c| c != d.ad.id).unwrap_or(true))
+            .collect();
     }
 
     /// 出当前在线行（FR-01.4：先 TTL 剪枝、再按名排序）。入参 `now` 为当前 epoch 秒。
@@ -108,7 +122,12 @@ impl DeviceTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mdns::DeviceAd;
+    use mdns::{DeviceAd, TTL_SECS};
+
+    /// 测试用「当前时间」：远大于 TTL，配合 last_seen=1 表示过期、last_seen=now 表示在线。
+    fn t_now() -> u64 {
+        TTL_SECS as u64 + 10
+    }
 
     fn ad(id: &str, name: &str, relay: bool) -> DeviceAd {
         DeviceAd {
@@ -145,12 +164,13 @@ mod tests {
 
     #[test]
     fn stale_devices_pruned() {
+        let now = t_now();
         let mut ds = vec![
-            dev("fresh", "fresh", "10.0.0.1", 90, false),
+            dev("fresh", "fresh", "10.0.0.1", now, false),
             dev("old", "old", "10.0.0.2", 1, false),
         ];
-        // now=100：old 的 last_seen=1 → 已过期 45s+，剪枝。
-        let rows = device_rows(&mut ds, 100);
+        // old 的 last_seen=1 → 已过期，剪枝。
+        let rows = device_rows(&mut ds, now);
         assert_eq!(rows.len(), 1, "过期设备被移除（FR-01.4）");
         assert_eq!(rows[0].name, "fresh");
     }
@@ -166,34 +186,50 @@ mod tests {
 
     #[test]
     fn find_online_by_id_prunes_stale() {
+        let now = t_now();
         let mut t = DeviceTable::new();
         t.apply_snapshot(vec![
-            dev("fresh", "fresh", "10.0.0.1", 90, false),
+            dev("fresh", "fresh", "10.0.0.1", now, false),
             dev("old", "old", "10.0.0.2", 1, false),
         ]);
-        // now=100：fresh 在线（last_seen=90 < 45s 过期窗），old 已过期（last_seen=1）。
-        assert!(t.find_online("fresh", 100).is_some(), "在线设备可解析");
-        assert!(t.find_online("old", 100).is_none(), "过期设备被剪枝不返回（FR-01.4）");
-        assert!(t.find_online("nope", 100).is_none(), "未知 id 返回 None");
+        assert!(t.find_online("fresh", now).is_some(), "在线设备可解析");
+        assert!(t.find_online("old", now).is_none(), "过期设备被剪枝不返回（FR-01.4）");
+        assert!(t.find_online("nope", now).is_none(), "未知 id 返回 None");
+    }
+
+    #[test]
+    fn local_device_is_filtered_out() {
+        let mut t = DeviceTable::new();
+        t.set_local_code("SELF");
+        t.apply_snapshot(vec![
+            dev("SELF", "本机", "10.0.0.1", 100, false),
+            dev("peer", "对端", "10.0.0.2", 100, false),
+        ]);
+        let rows = t.rows(100);
+        assert_eq!(rows.len(), 1, "本机被过滤");
+        assert_eq!(rows[0].id, "peer");
+        assert!(t.find_online("SELF", 100).is_none(), "本机不可被连接");
+        assert!(t.find_online("peer", 100).is_some(), "对端仍可连接");
     }
 
     #[test]
     fn device_table_mirrors_snapshot_prunes_and_sorts() {        // P1.1：宿主把监听器在线表快照镜像进来，再经 rows 出剪枝+排序行。
+        let now = t_now();
         let mut t = DeviceTable::new();
         assert!(t.is_empty());
         t.apply_snapshot(vec![
-            dev("b", "zzz", "10.0.0.2", 100, false),
-            dev("a", "aaa", "10.0.0.1", 100, true),
-            dev("old", "old", "10.0.0.3", 1, false), // now=100 时已过期
+            dev("b", "zzz", "10.0.0.2", now, false),
+            dev("a", "aaa", "10.0.0.1", now, true),
+            dev("old", "old", "10.0.0.3", 1, false), // 已过期
         ]);
         assert_eq!(t.len(), 3, "快照前 3 台");
-        let rows = t.rows(100);
+        let rows = t.rows(now);
         assert_eq!(rows.len(), 2, "过期设备被 TTL 剪枝（FR-01.4）");
         assert_eq!(rows[0].name, "aaa", "按名排序（aaa 在 zzz 前）");
         assert!(rows[0].relay);
         // 二次 apply_snapshot 整体替换语义。
-        t.apply_snapshot(vec![dev("c", "ccc", "10.0.0.7", 100, false)]);
+        t.apply_snapshot(vec![dev("c", "ccc", "10.0.0.7", now, false)]);
         assert_eq!(t.len(), 1, "快照整体替换（镜像）");
-        assert_eq!(t.rows(100)[0].name, "ccc");
+        assert_eq!(t.rows(now)[0].name, "ccc");
     }
 }

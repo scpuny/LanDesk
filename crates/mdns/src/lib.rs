@@ -25,7 +25,11 @@ pub const SERVICE_DOMAIN: &str = "_landesk._tcp.local.";
 /// 默认 QUIC 监听端口（protocol.md §4，可配置）。
 pub const DEFAULT_PORT: u16 = 52000;
 /// 实例 TTL（秒，对齐 FR-01.4 过期移除）。
-pub const TTL_SECS: u32 = 45;
+///
+/// 45s 偏紧：mDNS cache-refresh 在部分网络（跨网段 / 组播抑制 / 省电网卡）会被丢弃，
+/// 一次刷新丢失即误判离线。放宽到 180s，配合广播端周期 reannounce 心跳，
+/// 「刷新几次设备就消失」不再因单次丢包发生。
+pub const TTL_SECS: u32 = 180;
 
 /// 广播的设备信息（TXT 记录内容，protocol.md §4 表格）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -104,10 +108,11 @@ mod tests {
             last_seen: 100,
         };
         let mut vec = vec![d];
-        // now=140 → 间隔 40 < 45，保留
-        assert_eq!(prune_stale(&mut vec, 140), 0);
-        // now=150 → 间隔 50 > 45，移除
-        assert_eq!(prune_stale(&mut vec, 150), 1);
+        // 基于 TTL_SECS 计算，避免常量调整后断言失效。
+        let within = 100 + TTL_SECS as u64 - 1; // 间隔 < TTL，保留
+        let beyond = 100 + TTL_SECS as u64 + 1; // 间隔 > TTL，移除
+        assert_eq!(prune_stale(&mut vec, within), 0);
+        assert_eq!(prune_stale(&mut vec, beyond), 1);
         assert!(vec.is_empty());
     }
 }

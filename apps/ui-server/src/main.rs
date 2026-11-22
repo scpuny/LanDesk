@@ -225,13 +225,13 @@ async fn main() {
 
     // 启动 mDNS 广播器（FR-01.1）：只听不喊会让两台 ui-server 互相发现不了，
     // 故本机也按配置宣告自己。_advertiser 保活到进程结束（drop 即发 goodbye）。
-    let _advertiser = {
+    let advertiser = {
         let store = ConfigStore::new();
         match store.load_or_init() {
             Ok(cfg) if cfg.mdns_enabled => match landesk_ui::start_advertiser_default(&cfg) {
                 Ok(a) => {
                     tracing::info!("mDNS 广播已启动（本机宣告 _landesk._tcp.local.）");
-                    Some(a)
+                    Some(Arc::new(a))
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "mDNS 广播启动失败，本机不被发现");
@@ -245,6 +245,20 @@ async fn main() {
             }
         }
     };
+
+    // mDNS 广播心跳：每 60s 重宣告，强制对端 listener 刷新 last_seen（TTL=180s，3 次冗余），
+    // 避免组播刷新偶发丢失导致本机从对端列表消失。 advertiser Arc 同时保活到进程结束。
+    if let Some(adv) = advertiser.clone() {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                if let Err(e) = adv.heartbeat() {
+                    tracing::warn!(error = %e, "mDNS 心跳重宣告失败");
+                }
+            }
+        });
+    }
+    let _advertiser = advertiser; // 保活（drop 即发 goodbye）
 
     // GUI 兼作受控端（提醒4，期一）：按设置页访问密码起 QUIC 服务端，接受远端键鼠
     // 控制。空密码 → 不启动（纯控制端）；端口占用等失败 → 降级并告警。存进 Ctx 保活。
@@ -270,9 +284,17 @@ async fn main() {
         }
     });
 
+    // 本机设备码：mDNS 会收到自己的宣告，入表时排除，避免"我的设备"列出自己连不上。
+    let mut device_table = DeviceTable::new();
+    {
+        let store = ConfigStore::new();
+        if let Ok(cfg) = store.load_or_init() {
+            device_table.set_local_code(device_code_from(&cfg.device_name));
+        }
+    }
     let ctx = Ctx {
         listener: Arc::new(Mutex::new(listener)),
-        devices: Arc::new(Mutex::new(DeviceTable::new())),
+        devices: Arc::new(Mutex::new(device_table)),
         store: ConfigStore::new(),
         ring,
         // 会话管理器（P2 遗留 ①）：信任任意证书的 QUIC 客户端（LAN 内网信任域，FR-01）。
