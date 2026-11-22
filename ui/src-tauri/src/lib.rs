@@ -49,6 +49,9 @@ pub mod state {
         /// 会话窗关闭闸门：`true` = 本次关闭已获确认（或前端内部流程主动关），
         /// `on_window_event(CloseRequested)` 放行；否则拦截并让前端弹二次确认。
         pub session_allow_close: std::sync::atomic::AtomicBool,
+        /// mDNS 广播器（FR-01.1）：按本机配置宣告自己，让局域网其他端能发现。
+        /// 存进 state 仅为保活——drop 会发 mDNS goodbye 下线；无端可广播时为 `None`。
+        pub advertiser: Option<landesk_ui::Advertiser>,
     }
 }
 
@@ -464,6 +467,29 @@ pub fn run() {
             None
         }
     };
+    // 启动 mDNS 广播器（FR-01.1）：只听不喊会导致局域网内互相发现不了，
+    // 故本机也按配置宣告自己。失败不致命（无网卡 / 端口占用），降级为不广播。
+    let advertiser = {
+        let store = landesk_ui::ConfigStore::new();
+        match store.load_or_init() {
+            Ok(cfg) if cfg.mdns_enabled => match landesk_ui::start_advertiser_default(&cfg) {
+                Ok(a) => {
+                    eprintln!("landesk-app: mDNS 广播已启动（本机宣告 _landesk._tcp.local.）");
+                    Some(a)
+                }
+                Err(e) => {
+                    eprintln!("landesk-app: mDNS 广播启动失败，本机不被发现（{e}）");
+                    None
+                }
+            },
+            Ok(_) => None, // 用户在设置页关了 mDNS 发现
+            Err(e) => {
+                eprintln!("landesk-app: 配置读取失败，跳过 mDNS 广播（{e}）");
+                None
+            }
+        }
+    };
+
     // 克隆 Arc 进后台任务（原句柄留给 state 共享）。
     let devices_bg = Arc::clone(&devices);
     tauri::async_runtime::spawn(async move {
@@ -521,6 +547,7 @@ pub fn run() {
             session,
             session_launch: std::sync::Mutex::new(None),
             session_allow_close: std::sync::atomic::AtomicBool::new(false),
+            advertiser,
         })
         .invoke_handler(tauri::generate_handler![
             config_load_or_init,
