@@ -12,6 +12,7 @@
 //! - [`config_store`]：配置页持久化（FR-08，默认路径 + 首次生成模板）；
 //! - [`reconnect_view`]：重连指示器（FR-05.4，接 M7 `ReconnectScheduler`）。
 
+pub mod advertiser;
 pub mod config_store;
 pub mod devices;
 pub mod local_info;
@@ -23,6 +24,7 @@ pub mod session;
 pub mod status;
 pub mod video;
 
+pub use advertiser::{device_ad_of, start_advertiser, start_advertiser_default};
 pub use config_store::{ConfigStore, StoreError, default_config_path};
 pub use devices::{device_rows, DeviceRow, DeviceTable, now_secs};
 pub use local_info::{
@@ -51,6 +53,7 @@ pub use landesk_core::SessionState;
 pub use lp::msg::ControlMsg;
 pub use mdns::OnlineDevice;
 pub use mdns::Listener;
+pub use mdns::Advertiser;
 pub use quic_link::ConnMode;
 pub use quic_link::QuicClient;
 

@@ -220,6 +220,29 @@ async fn main() {
         }
     };
 
+    // 启动 mDNS 广播器（FR-01.1）：只听不喊会让两台 ui-server 互相发现不了，
+    // 故本机也按配置宣告自己。_advertiser 保活到进程结束（drop 即发 goodbye）。
+    let _advertiser = {
+        let store = ConfigStore::new();
+        match store.load_or_init() {
+            Ok(cfg) if cfg.mdns_enabled => match landesk_ui::start_advertiser_default(&cfg) {
+                Ok(a) => {
+                    tracing::info!("mDNS 广播已启动（本机宣告 _landesk._tcp.local.）");
+                    Some(a)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "mDNS 广播启动失败，本机不被发现");
+                    None
+                }
+            },
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!(error = %e, "配置读取失败，跳过 mDNS 广播");
+                None
+            }
+        }
+    };
+
     let ctx = Ctx {
         listener: Arc::new(Mutex::new(listener)),
         devices: Arc::new(Mutex::new(DeviceTable::new())),

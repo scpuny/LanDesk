@@ -77,7 +77,6 @@ const currentView = computed(() => views[state.mainView] || Remote)
         <div class="ld-topbar__actions">
           <button class="ld-icon-btn ld-theme-toggle" :title="'主题：' + pref" @click="themeOpen = !themeOpen"><Icon :name="pref === 'dark' ? 'moon' : 'sun'" :size="17" /></button>
           <button class="ld-icon-btn" title="通知" @click="toasts.length && toasts[0]"><Icon name="bell" :size="17" /></button>
-          <span class="ld-avatar">陈</span>
         </div>
         <!-- Win/Linux 自绘控制键；主框去掉「最大化」（本软件只需 最小化 + 关闭），macOS 走系统交通灯不渲染；浏览器预览隐藏 -->
         <WindowControls noMax />

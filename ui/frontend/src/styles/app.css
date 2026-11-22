@@ -44,7 +44,9 @@
 .ld-topbar__title { font-size: var(--ll-fs-xl); font-weight: var(--ll-fw-semibold); line-height: 1.2; }
 .ld-topbar__sub { font-size: var(--ll-fs-sm); color: var(--ll-color-text-tertiary); }
 .ld-topbar__spacer { flex: 1; }
-.ld-topbar__actions { display: flex; align-items: center; gap: var(--ll-space-2); }
+/* 右侧留白：macOS / 浏览器预览不渲染自绘三键，按钮不能贴窗口右边缘；
+   Windows/Linux 下这段留白恰好隔开通知键与自绘三键。 */
+.ld-topbar__actions { display: flex; align-items: center; gap: var(--ll-space-2); margin-right: var(--ll-space-4); }
 /* 自绘主窗体 macOS（交通灯 overlay）：顶栏左侧留白避开原生交通灯（三键宽约 78px）。
    Win/Linux（decorations:false）不套此类 —— 窗口三键在右侧，左侧无系统元素。 */
 .ld-topbar--mac { padding-left: 80px; }
@@ -54,12 +56,6 @@
   transition: background var(--ll-duration-fast), color var(--ll-duration-fast);
 }
 .ld-icon-btn:hover { background: var(--ll-color-surface-hover); color: var(--ll-color-text); }
-.ld-avatar {
-  width: 30px; height: 30px; border-radius: 50%; background: var(--ll-color-brand);
-  color: var(--ll-color-text-inverse); display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--ll-fs-sm); font-weight: var(--ll-fw-semibold); margin-left: var(--ll-space-1);
-}
-
 /* ---------------- 左侧导航 ---------------- */
 .ld-rail {
   width: var(--ll-rail-w);
@@ -512,8 +508,9 @@
   color: var(--ll-color-text-secondary); display: flex; flex-direction: column; gap: 6px;
 }
 .ld-theme-card.is-active { border-color: var(--ll-color-brand); color: var(--ll-color-brand); }
-.ld-swatch { display: flex; height: 18px; border-radius: 4px; overflow: hidden; }
-.ld-swatch i { flex: 1; }
+.ld-swatch { display: flex; align-items: stretch; height: 18px; border-radius: 4px; overflow: hidden; }
+/* 空 <i> 作 flex item 在部分引擎下会交叉轴塌陷为 0 高：显式块级 + 满高 + 最小宽度，保证三段色块可见。 */
+.ld-swatch i { display: block; flex: 1 1 0; min-width: 0; height: 100%; }
 
 /* ---------------- 响应式 ---------------- */
 /* 首页下方两卡（本机设备码 / 本机运行信息）在默认 980 窗口下保持一行；
