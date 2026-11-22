@@ -165,10 +165,13 @@ fn collect_cpp(dir: &Path, out: &mut Vec<(PathBuf, Kind)>) {
 }
 
 fn common_defines(gnu: bool) -> Vec<&'static str> {
+    // 不定义 GENERATED_VERSION_HEADER：version.h 会走默认版本串分支，
+    // 不再依赖上游 Makefile 生成的 version_gen.h（该文件被 .gitignore 忽略、未入库，
+    // CI 无此文件会编译失败）。版本串仅用于日志，不影响编码功能。
     if gnu {
-        vec!["-O2", "-std=c++17", "-fPIC", "-DNDEBUG", "-DGENERATED_VERSION_HEADER"]
+        vec!["-O2", "-std=c++17", "-fPIC", "-DNDEBUG"]
     } else {
-        vec!["/nologo", "/O2", "/std:c++17", "/DNDEBUG", "/DGENERATED_VERSION_HEADER", "/EHsc"]
+        vec!["/nologo", "/O2", "/std:c++17", "/DNDEBUG", "/EHsc"]
     }
 }
 

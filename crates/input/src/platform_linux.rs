@@ -99,7 +99,9 @@ impl UinputInjector {
             let mut dev: uinput_user_dev = core::mem::zeroed();
             let name = b"LanDesk-VNC";
             for (i, &b) in name.iter().enumerate() {
-                dev.name[i] = b as i8;
+                // uinput_user_dev.name 元素类型随 libc/arch 而异（aarch64=u8, x86_64=i8），
+                // 用 `as _` 让编译器按目标平台字段类型推断，避免交叉编译时类型不匹配。
+                dev.name[i] = b as _;
             }
             dev.id.bustype = 0x03; // BUS_USB
             dev.id.vendor = 0x1;
