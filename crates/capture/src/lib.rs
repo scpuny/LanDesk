@@ -7,9 +7,61 @@
 pub mod dirty;
 pub mod monitors;
 
+// 平台真实采屏实现（cfg 门控，按 target_os 自动编译）。
+#[cfg(target_os = "macos")]
+pub mod platform_macos;
+#[cfg(target_os = "windows")]
+pub mod platform_windows;
+#[cfg(target_os = "linux")]
+pub mod platform_linux;
+
 use std::fmt;
 
 use thiserror::Error;
+
+/// 构造当前平台的真实采屏器（主显示器列表）。
+///
+/// 无权限 / 无显示服务（macOS 未授权屏幕录制、Linux 无 DISPLAY）→ `Err`，
+/// 由调用方降级为 [`SynthCapture`]（只影响画面，不影响会话/键鼠）。
+pub fn platform_capture() -> Result<Box<dyn ScreenCapture>, CaptureError> {
+    #[cfg(target_os = "macos")]
+    {
+        platform_macos::CGDisplayCapture::new()
+            .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        platform_windows::GdiCapture::new().map(|c| Box::new(c) as Box<dyn ScreenCapture>)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        platform_linux::X11Capture::new().map(|c| Box::new(c) as Box<dyn ScreenCapture>)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err(CaptureError::BackendUnavailable("unsupported platform".into()))
+    }
+}
+
+/// 当前平台显示器列表（真实枚举；失败返回 Err，由调用方回退默认单屏）。
+pub fn platform_monitors() -> Result<Vec<Monitor>, CaptureError> {
+    #[cfg(target_os = "macos")]
+    {
+        platform_macos::platform_monitors()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        platform_windows::platform_monitors()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        platform_linux::platform_monitors()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err(CaptureError::BackendUnavailable("unsupported platform".into()))
+    }
+}
 
 /// 采集层错误。
 #[derive(Debug, Error, PartialEq, Eq)]

@@ -26,6 +26,12 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[features]
+default = []
+# openh264：真 H.264 编码（avcodec-wrap/openh264）+ 平台真实采屏。
+# GUI / ui-server 生产构建经 landesk-ui 默认开启；纯逻辑测试可关闭以跳过 C++ 编译。
+openh264 = ["avcodec-wrap/openh264"]
+
 [dev-dependencies]
 mdns = { workspace = true }
 lp = { workspace = true }

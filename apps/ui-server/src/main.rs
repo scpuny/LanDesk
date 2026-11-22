@@ -21,10 +21,10 @@ use axum::{
 };
 use clap::Parser;
 use futures_util::stream;
-use landesk_ui::{
-    device_code_from, ControlAction, Config, ConfigStore, DeviceTable, HoleResult, LogLine,
-    LogRing, OnlineDevice, PathDecisionView, ReconnectScheduler, SessionManager, SessionResp,
-    VideoFrameMsg, decide_path, gen_temp_password, local_info_of, schedule_of, view_of,
+use     landesk_ui::{
+    device_code_from, ControlAction, Config, ConfigStore, ControlledHost, DeviceTable, HoleResult,
+    LogLine, LogRing, OnlineDevice, PathDecisionView, ReconnectScheduler, SessionManager,
+    SessionResp, VideoFrameMsg, decide_path, gen_temp_password, local_info_of, schedule_of, view_of,
 };
 use mdns::Listener;
 use std::convert::Infallible;
@@ -64,6 +64,9 @@ struct Ctx {
     ring: Arc<Mutex<LogRing>>,
     /// 会话管理器（P2 遗留 ①，矩阵 §7.5）：QUIC 客户端 + 活跃会话 + 状态栏折叠。
     session: Arc<tokio::sync::Mutex<SessionManager>>,
+    /// GUI 兼作受控端（提醒4）：QUIC 服务端 accept 任务保活（Arc 共享，drop 时 abort）。
+    /// 下划线前缀：仅持有保活，无读取点（状态走 `/api/controlled-status` 从配置派生）。
+    _controlled: Arc<Option<ControlledHost>>,
     static_dir: PathBuf,
 }
 
@@ -243,6 +246,30 @@ async fn main() {
         }
     };
 
+    // GUI 兼作受控端（提醒4，期一）：按设置页访问密码起 QUIC 服务端，接受远端键鼠
+    // 控制。空密码 → 不启动（纯控制端）；端口占用等失败 → 降级并告警。存进 Ctx 保活。
+    let controlled: Arc<Option<ControlledHost>> = Arc::new({
+        let store = ConfigStore::new();
+        match store.load_or_init() {
+            Ok(cfg) => match ControlledHost::start(&cfg) {
+                Ok(h) => {
+                    if h.is_serving() {
+                        tracing::info!(device_code = %h.device_code(), "GUI 受控服务已启动");
+                    }
+                    Some(h)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "受控服务启动失败，降级为纯控制端");
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "配置读取失败，跳过受控服务");
+                None
+            }
+        }
+    });
+
     let ctx = Ctx {
         listener: Arc::new(Mutex::new(listener)),
         devices: Arc::new(Mutex::new(DeviceTable::new())),
@@ -256,6 +283,7 @@ async fn main() {
                     .expect("quic client init"),
             ),
         )),
+        _controlled: controlled,
         static_dir: static_dir.clone(),
     };
 
@@ -315,6 +343,25 @@ async fn main() {
                     )
                         .into_response(),
                 }
+            }),
+        )
+        // 受控服务状态（提醒4）：设置页展示「受控服务：已启用/未启用」+ 设备码。
+        .route(
+            "/api/controlled-status",
+            get(|State(ctx): State<Ctx>| async move {
+                let cfg = ctx.store.load_or_init().unwrap_or_default();
+                let device_code = device_code_from(&cfg.device_name);
+                let serving = cfg
+                    .password
+                    .as_deref()
+                    .map(|p| !p.trim().is_empty())
+                    .unwrap_or(false);
+                Json(landesk_ui::ControlledStatus {
+                    serving,
+                    port: landesk_ui::DEFAULT_PORT,
+                    device_code,
+                })
+                .into_response()
             }),
         )
         // 连接路径决策（FR-05/FR-11）。

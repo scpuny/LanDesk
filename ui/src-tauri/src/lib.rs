@@ -52,6 +52,28 @@ pub mod state {
         /// mDNS 广播器（FR-01.1）：按本机配置宣告自己，让局域网其他端能发现。
         /// 存进 state 仅为保活——drop 会发 mDNS goodbye 下线；无端可广播时为 `None`。
         pub advertiser: Option<landesk_ui::Advertiser>,
+        /// GUI 受控端（提醒4）：按设置页访问密码起 QUIC 服务端，接受远端键鼠控制。
+        /// 存进 state 仅为保活 + 优雅下线（drop 时 abort accept 任务）；空密码为 `None`。
+        pub controlled: Option<landesk_ui::ControlledHost>,
+    }
+}
+
+/// 受控服务状态（设置页展示「已启用/未启用」）：从本机配置派生，无需持有宿主。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+fn controlled_status() -> landesk_ui::ControlledStatus {
+    let store = landesk_ui::ConfigStore::new();
+    let cfg = store.load_or_init().unwrap_or_default();
+    let device_code = landesk_ui::device_code_from(&cfg.device_name);
+    let serving = cfg
+        .password
+        .as_deref()
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    landesk_ui::ControlledStatus {
+        serving,
+        port: landesk_ui::DEFAULT_PORT,
+        device_code,
     }
 }
 
@@ -539,6 +561,27 @@ pub fn run() {
     // 终端无输出（GUI 壳日志进环形缓冲供日志页查询，不刷 stdout 污染 Tauri 窗体）。
     install_ring_subscriber(Arc::clone(&ring));
 
+    // GUI 兼作受控端（提醒4，期一）：按设置页访问密码起 QUIC 服务端，接受远端
+    // 键鼠控制。须在 async runtime 内构造（QUIC 端点注册 UDP 驱动）；端口占用 /
+    // 证书失败时降级为纯控制端，不影响发起连接。存进 state 仅为保活 + 优雅下线。
+    let controlled = tauri::async_runtime::block_on(async {
+        let cfg = landesk_ui::ConfigStore::new()
+            .load_or_init()
+            .unwrap_or_default();
+        match landesk_ui::ControlledHost::start(&cfg) {
+            Ok(h) => {
+                if h.is_serving() {
+                    eprintln!("landesk-app: 受控服务已启动（设备码 {}，端口 {}）", h.device_code(), landesk_ui::DEFAULT_PORT);
+                }
+                Some(h)
+            }
+            Err(e) => {
+                eprintln!("landesk-app: 受控服务启动失败，降级为纯控制端（{e}）");
+                None
+            }
+        }
+    });
+
     tauri::Builder::default()
         .manage(AppState {
             status: std::sync::Mutex::new(landesk_ui::StatusBarModel::new()),
@@ -548,10 +591,12 @@ pub fn run() {
             session_launch: std::sync::Mutex::new(None),
             session_allow_close: std::sync::atomic::AtomicBool::new(false),
             advertiser,
+            controlled,
         })
         .invoke_handler(tauri::generate_handler![
             config_load_or_init,
             config_save,
+            controlled_status,
             device_list,
             reconnect_view,
             reconnect_schedule,

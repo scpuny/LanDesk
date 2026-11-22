@@ -4,14 +4,24 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk 键鼠注入（受控端）：LKC 映射到平台注入 API。M1 占位。"
+description = "LanDesk 键鼠注入（受控端）：LKC 映射到三平台原生注入 API（macOS CGEvent / Windows SendInput / Linux uinput）。"
 
 [dependencies]
 lp = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# 平台实现按 target_os 自动编译（无需手动开 feature）：
+# - macOS：CGEvent 走 extern "C" FFI 链 ApplicationServices（无需 core-graphics crate）；
+# - Windows：windows-sys 0.61.2（vendor 已含 Win32_UI_Input_KeyboardAndMouse）；
+# - Linux：uinput 经 libc ioctl（vendor 已含 libc）。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
 
 [features]
+# 保留 feature 兼容（早期 M1 占位用）；平台实现实际按 target_os cfg 门控。
 windows = []
 linux = []
 macos = []

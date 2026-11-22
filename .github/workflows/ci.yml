@@ -70,6 +70,21 @@ jobs:
         # rust-toolchain.toml 声明 stable，rustup 按文件自动安装
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup MSVC (openh264 真编码 C++ 构建需 cl.exe / lib.exe)
+        # landesk-ui 默认开启 openh264 feature → workspace build 会编译
+        # third_party/openh264 的 C++ 源码；Windows 需 MSVC 环境（默认 PATH 无 cl.exe）。
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux X11 headers (capture 平台采屏直链 libX11)
+        # crates/capture 的 platform_linux.rs 用 #[link(name = "X11")] 直链 libX11；
+        # runner 有运行库但缺开发头文件，链接阶段报 "unable to find library -lX11"。
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev
+
       - name: Cache cargo target
         uses: actions/cache@v4
         with:
