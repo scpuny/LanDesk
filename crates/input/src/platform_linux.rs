@@ -22,8 +22,10 @@ const UI_SET_EVBIT: c_ulong = _iow(UINPUT_IOCTL_BASE, 100, 4);
 const UI_SET_KEYBIT: c_ulong = _iow(UINPUT_IOCTL_BASE, 101, 4);
 const UI_SET_ABSBIT: c_ulong = _iow(UINPUT_IOCTL_BASE, 103, 4);
 const UI_SET_RELBIT: c_ulong = _iow(UINPUT_IOCTL_BASE, 102, 4);
-const UI_DEV_CREATE: c_ulong = _io(UINPUT_IOCTL_BASE, 105);
-const UI_DEV_DESTROY: c_ulong = _io(UINPUT_IOCTL_BASE, 106);
+// linux/uinput.h: UI_DEV_CREATE=_IO('U',1), UI_DEV_DESTROY=_IO('U',2)。
+// 注意不是 105/106（那是 UI_SET_LEDBIT/SNDBIT 的 nr）。
+const UI_DEV_CREATE: c_ulong = _io(UINPUT_IOCTL_BASE, 1);
+const UI_DEV_DESTROY: c_ulong = _io(UINPUT_IOCTL_BASE, 2);
 
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
@@ -38,7 +40,9 @@ const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
 const BTN_MIDDLE: u16 = 0x112;
 
-const _IOC_WRITE: c_ulong = 2 << 30;
+// linux/ioctl.h: _IOC_WRITE=1；方向位在 _ioc() 内左移 _IOC_DIRSHIFT(=30)。
+// 切勿在这里预移位——曾误写 2<<30 导致二次移位，ioctl 码整体错位，uinput 注入失效。
+const _IOC_WRITE: c_ulong = 1;
 
 const fn _ioc(dir: c_ulong, ty: c_ulong, nr: c_ulong, size: c_ulong) -> c_ulong {
     (dir << 30) | (size << 16) | (ty << 8) | nr
