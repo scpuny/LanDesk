@@ -76,6 +76,15 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install Linux X11 headers (capture 平台采屏直链 libX11)
+        # crates/capture 的 platform_linux.rs 用 #[link(name = "X11")] 直链 libX11；
+        # runner 有运行库但缺开发头文件，链接阶段报 "unable to find library -lX11"。
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev
+
       - name: Cache cargo target
         uses: actions/cache@v4
         with:

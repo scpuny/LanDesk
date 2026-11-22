@@ -329,6 +329,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install libX11 headers (capture 平台采屏直链 libX11)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev
+
       - name: Build CLI (x86_64, 主仓 vendor 离线)
         run: |
           set -euo pipefail
@@ -447,9 +453,12 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
+          # 多架构源：capture 直链 libX11，交叉构建需 arm64 版 X11 头文件/库。
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update -qq
           sudo apt-get install -y -qq \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libc6-dev-arm64-cross
+            libc6-dev-arm64-cross libx11-dev:arm64
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Build CLI (aarch64, ring CC 交叉, best-effort)
