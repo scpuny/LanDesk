@@ -16,6 +16,10 @@ pub struct Advertiser {
     daemon: ServiceDaemon,
     /// 已注册的完整实例名（`my_name._landesk._tcp.local.`），供 `unregister` 用。
     fullname: String,
+    /// 注册参数快照，供周期 `heartbeat()` 重新宣告（对端据此刷新 last_seen）。
+    device: DeviceAd,
+    port: u16,
+    host: String,
 }
 
 /// 生成合法的 mDNS hostname（SRV 记录 target，必须非空且符合 DNS label 规则）。
@@ -61,7 +65,21 @@ impl Advertiser {
         daemon.register(info).map_err(MdnsError::from)?;
 
         debug!(instance = %instance, %host, port, "mdns 已注册 _landesk 服务");
-        Ok(Self { daemon, fullname })
+        Ok(Self {
+            daemon,
+            fullname,
+            device: device.clone(),
+            port,
+            host,
+        })
+    }
+
+    /// 周期心跳：重新宣告本服务，强制对端 listener 收到 `ServiceResolved` 刷新 last_seen。
+    ///
+    /// mdns-sd 自身有 cache-refresh，但在组播抑制 / 跨网段 / 省电网卡环境可能丢刷新包；
+    /// 由广播端主动重播兜底，避免对端 TTL 过期后把本机从列表移除（"刷新几次设备消失"）。
+    pub fn heartbeat(&self) -> Result<(), MdnsError> {
+        self.reannounce(&self.device, self.port, &self.host)
     }
 
     /// 重新宣告（IP 变化 / 设备信息更新时调用，无需先 unregister）。

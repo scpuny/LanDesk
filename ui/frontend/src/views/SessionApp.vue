@@ -21,10 +21,11 @@ function asPath(p: string | null): ConnMode {
 onMounted(async () => {
   // 首帧：壳里存了本次发起的目标（session_window_open 写入 session_launch）。
   const launch = await readSessionLaunch()
-  if (launch.target) startSession(launch.target, asPath(launch.path))
+  // 真实桌面会话窗：停在「待鉴权」页让用户输入对方访问密码后再建连（非演示动画）。
+  if (launch.target) startSession(launch.target, asPath(launch.path), 'await-auth')
   // 同一会话窗已开时主窗再发起（切设备）→ session://open 事件重设目标。
   unwatch = watchSessionOpen((p) => {
-    if (p.target) startSession(p.target, asPath(p.path))
+    if (p.target) startSession(p.target, asPath(p.path), 'await-auth')
   })
 })
 onBeforeUnmount(() => { if (unwatch) unwatch() })

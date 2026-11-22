@@ -108,15 +108,21 @@ async function confirmCloseWindow(): Promise<void> {
     closeConfirming = false
   }
 }
+/** 拿当前目标 + 输入的访问密码真正建连（会话窗「建立连接」/鉴权失败「重新验证」共用）。
+ *  密码可空：后端受控服务按密码门禁，空密码会明确失败（对方未开启受控服务 / 密码错），
+ *  由后端错误区分，不在前端猜测。 */
+async function connectFromTarget(): Promise<void> {
+  if (!state.sessionTarget) { toast('没有连接目标', 'warning'); return }
+  setState('auth')
+  const r = await connectSession(state.sessionTarget.id, password.value)
+  if (r.ok) { setState('running'); toast('会话已建立，正在接收画面') }
+  else { setState('authfailed'); toast(r.error || '鉴权失败', 'error') }
+}
+
 async function verify() {
   if (!password.value) { toast('请输入临时密码', 'warning'); return }
   // live：凭临时密码重连当前目标（鉴权重试）；非 live 演示态直接转 running。
-  if (isLive.value && state.sessionTarget) {
-    const r = await connectSession(state.sessionTarget.id, password.value)
-    if (r.ok) { setState('running'); toast('鉴权成功，会话已建立') }
-    else { setState('authfailed'); toast(r.error || '鉴权失败', 'error') }
-    return
-  }
+  if (isLive.value && state.sessionTarget) { await connectFromTarget(); return }
   setState('running'); toast('鉴权成功，会话已建立')
 }
 async function retryNow() {
@@ -461,8 +467,16 @@ watch(() => state.sessionState, (s) => {
 
 // live：后端会话状态快照 → 本地 `state`（状态机 + 目标 + 连接方式 + 度量），驱动顶部标签 + 底部状态栏。
 // 非 live 时 `liveSession` 恒 null，watcher 不写 `state`（演示路径保留）。
+//
+// ★ 竞态防护：会话独立窗体装载时，`SessionApp.onMounted` 先 `readSessionLaunch()` 拿目标并
+// `startSession(target)` 把本地置为 auth+target；本组件 `onMounted` 又 `loadSessionStatus()`
+// 拉后端快照。此刻后端会话尚未建立（`status_view()` = idle + target:null）。两个 async hook
+// 完成顺序不确定——若 idle 快照后到，会把刚设好的 auth+target 覆盖回 idle → 用户看到
+// 「尚未连接远程设备」白屏（点击设备没反应）。故 idle 且无 target 的快照一律忽略：它代表
+// 「控制端本地还没有活跃会话」，不应覆盖前端待连接目标 / 鉴权失败等本地态。
 watch(liveSession, (snap) => {
   if (!snap) return
+  if (snap.stateCode === 'idle' && !snap.target) return
   state.sessionState = snap.stateCode
   state.path = snap.connModeCode
   state.sessionTarget = snap.target
@@ -567,17 +581,36 @@ onBeforeUnmount(() => {
         <div style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:11px;color:#e8edf5;opacity:.5">鼠标移上 3 秒自动隐藏工具栏</div>
       </template>
 
-      <!-- 建立中 -->
+      <!-- 鉴权中（已输密码、后端正在建连） -->
       <div v-else-if="state.sessionState === 'auth'" class="ld-sess-overlay">
         <div class="ld-sess-spinner" />
         <div class="ld-sess-title" style="font-size:18px">正在建立安全会话</div>
-        <div class="ld-sess-desc">设备码 {{ targetName }} · 已耗时 2.4 秒</div>
+        <div class="ld-sess-desc">设备码 {{ targetName }} · 正在协商密钥与建立加密通道…</div>
         <div class="ld-sess-steps">
-          <span class="ld-sess-step is-done"><Icon name="check" :size="14" /> 协商密钥 · X25519 完成</span>
-          <span class="ld-sess-step is-active"><Icon name="activity" :size="14" /> 探测连接路径 · ICE 打洞中</span>
+          <span class="ld-sess-step is-active"><Icon name="activity" :size="14" /> 协商密钥 · X25519</span>
+          <span class="ld-sess-step"><Icon name="clock" :size="14" /> 探测连接路径 · 内网直连</span>
           <span class="ld-sess-step"><Icon name="clock" :size="14" /> 建立加密通道 · 等待中</span>
         </div>
         <button class="ll-btn ll-btn--default" @click="cancel"><Icon name="close" :size="14" /> 取消连接</button>
+      </div>
+
+      <!-- 待鉴权：拿到目标后先输入对方访问密码（对齐「点设备→输密码→看桌面」闭环） -->
+      <div v-else-if="state.sessionState === 'idle' && state.sessionTarget" class="ld-sess-overlay">
+        <div class="ld-sess-bigicon"><Icon name="key" :size="30" /></div>
+        <div class="ld-sess-title" style="font-size:18px">连接 {{ targetName }}</div>
+        <div class="ld-sess-desc">请输入对方设备的访问密码（对方设置页「访问密码」，留空则对方未开启受控服务）</div>
+        <div class="ld-sess-password-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <Icon name="key" :size="16" style="color:var(--ll-color-brand)" />
+            <b>对方访问密码</b>
+          </div>
+          <input v-model="password" type="password" class="ll-input" placeholder="请输入对方设备访问密码"
+                 @keyup.enter="connectFromTarget" />
+          <div class="ld-sess-actions">
+            <button class="ll-btn ll-btn--primary" @click="connectFromTarget"><Icon name="link" :size="14" /> 建立连接</button>
+            <button class="ll-btn ll-btn--default" @click="cancel"><Icon name="close" :size="14" /> 取消</button>
+          </div>
+        </div>
       </div>
 
       <!-- 重连中 -->
