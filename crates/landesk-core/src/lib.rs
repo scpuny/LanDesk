@@ -26,6 +26,7 @@ pub mod oneclick;
 pub mod input;
 pub mod clipboard_flow;
 pub mod reconnect;
+pub mod video_pump;
 
 pub use auth::{ClientHandshake, ServerHandshake, SessionKeys, session_keys};
 pub use bootstrap::{derive as derive_bootstrap, Bootstrap};
@@ -33,5 +34,6 @@ pub use clipboard_flow::{ClipboardFlow, receive_clipboard};
 pub use error::CoreError;
 pub use input::{apply_input, DispatchResult};
 pub use oneclick::{Controlled, Controller, OneClickSession};
+pub use video_pump::{PumpConfig, VideoFrame, VideoPump};
 pub use reconnect::{BackoffPolicy, ReconnectScheduler};
 pub use session::SessionState;

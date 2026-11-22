@@ -18,5 +18,7 @@ nvenc = []
 amf = []
 v4l2m2m = []
 videotoolbox = []
+# openh264：编译 third_party/openh264（Cisco 2.4.1 裁剪源码 + C ABI 桥接层）为静态库，
+# 提供真 H.264 编码（WebCodecs 可解）。build.rs 用平台 C++ 编译器，无需 nasm / 新 crate。
 openh264 = []
 default = []

@@ -9,9 +9,15 @@ description = "LanDesk 屏幕采集：trait + 脏矩形检测（平台实现按 
 [dependencies]
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# 平台实现按 target_os 自动编译（extern FFI 为主，无新外部 crate）：
+# - macOS：CoreGraphics/ApplicationServices framework（系统自带）；
+# - Windows：windows-sys 0.61.2（vendor 已含 Win32_Graphics_Gdi）；
+# - Linux：libX11（extern "C" 直链，CI 需 libx11-dev）。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [features]
-# 平台采集实现按需开启；默认无（纯逻辑可跨平台测试）
+# 保留 feature 兼容（早期 M1 占位用）；平台实现实际按 target_os cfg 门控。
 windows = []
 linux = []
 macos = []

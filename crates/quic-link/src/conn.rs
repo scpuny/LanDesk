@@ -163,6 +163,17 @@ impl QuicConnection {
             conn: self.conn.clone(),
         }
     }
+
+    /// 克隆出一个**可独立持有**的视频 Datagram 发送句柄（`Send + Sync + 'static`）。
+    ///
+    /// 与 [`Self::video_rx`] 对称：受控端把发流泵 `move` 进独立 `tokio` 任务时，
+    /// 只需 `send_datagram`（不碰会话控制流的 `&mut`）。这样视频发送与控制帧
+    /// 接收（期四键鼠注入）可在同一会话上并发，互不争用 `OneClickSession`。
+    pub fn video_tx(&self) -> VideoDatagramTx {
+        VideoDatagramTx {
+            conn: self.conn.clone(),
+        }
+    }
 }
 
 /// 视频 Datagram 接收句柄（[`QuicConnection`] 的 `&self` 克隆视图，可跨任务持有）。
@@ -181,5 +192,24 @@ impl VideoDatagramRx {
             Ok(dg) => Ok(dg.to_vec()),
             Err(_) => Err(QuicLinkError::ControlClosed),
         }
+    }
+}
+
+/// 视频 Datagram 发送句柄（[`QuicConnection`] 的 `&self` 克隆视图，可跨任务持有）。
+///
+/// 见 [`QuicConnection::video_tx`]；受控端发流泵用它在独立任务里循环发视频 Datagram，
+/// 与控制帧接收并发（GUI 兼作受控端，画面 + 键鼠同时跑）。
+#[derive(Debug, Clone)]
+pub struct VideoDatagramTx {
+    conn: Connection,
+}
+
+impl VideoDatagramTx {
+    /// 发送一个视频 Datagram（明文）；超对端 datagram 容量返回
+    /// [`QuicLinkError::VideoDropped`]。
+    pub fn send(&self, plain: &[u8]) -> Result<(), QuicLinkError> {
+        self.conn
+            .send_datagram(bytes::Bytes::copy_from_slice(plain))
+            .map_err(|_| QuicLinkError::VideoDropped)
     }
 }
