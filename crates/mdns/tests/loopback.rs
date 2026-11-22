@@ -28,7 +28,8 @@ async fn loopback_discovery() {
     let expected = ad.instance_name();
 
     // 受控端广播（addr_auto 自动填本机关卡）。
-    let advertiser = Advertiser::start(&ad, 52000, "landesk-it").expect("advertiser");
+    // 传空 host 走兜底路径（v0.3.0 bug 回归：空 SRV target 导致对端无法 resolve）。
+    let advertiser = Advertiser::start(&ad, 52000, "").expect("advertiser");
     // 等注册 + 组播包生效。
     tokio::time::sleep(Duration::from_millis(500)).await;
 
