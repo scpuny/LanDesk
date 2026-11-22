@@ -52,6 +52,7 @@ fn main() {
 
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
     if target_env == "msvc" {
         build_msvc(&sources, &obj_dir, &out, &codec);
@@ -63,7 +64,7 @@ fn main() {
                 "g++".into()
             }
         });
-        build_gnu(&cxx, &sources, &obj_dir, &out, &codec);
+        build_gnu(&cxx, &sources, &obj_dir, &out, &codec, &target_os, &target_arch);
     }
 
     println!("cargo:rustc-link-search=native={}", out.display());
@@ -175,12 +176,36 @@ fn common_defines(gnu: bool) -> Vec<&'static str> {
     }
 }
 
-fn build_gnu(cxx: &str, sources: &[(PathBuf, Kind)], obj_dir: &Path, out: &Path, codec: &Path) {
+fn build_gnu(
+    cxx: &str,
+    sources: &[(PathBuf, Kind)],
+    obj_dir: &Path,
+    out: &Path,
+    codec: &Path,
+    target_os: &str,
+    target_arch: &str,
+) {
+    // macOS（Apple clang）用 -arch 指定目标架构。arm64 runner 交叉编 x86_64 时，
+    // clang++ 默认产出宿主 arm64 .o，链接器忽略后符号全丢（v0.4.0 缺 Intel dmg 根因）。
+    // 非 macOS 平台忽略：GNU 交叉靠 CC/CXX 前缀工具链（如 aarch64-linux-gnu-g++）。
+    let arch_flag: Vec<&str> = if target_os == "macos" {
+        match target_arch {
+            "x86_64" => vec!["-arch", "x86_64"],
+            "aarch64" => vec!["-arch", "arm64"],
+            _ => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     let mut objects = Vec::new();
     for (i, (src, kind)) in sources.iter().enumerate() {
         let obj = obj_dir.join(format!("oh264_{i}.o"));
         let mut cmd = Command::new(cxx);
         for f in common_defines(true) {
+            cmd.arg(f);
+        }
+        for f in &arch_flag {
             cmd.arg(f);
         }
         cmd.arg("-c").arg(src);
