@@ -29,9 +29,11 @@ use tracing::{debug, warn};
 
 use crate::device_code_from;
 
-/// 期一合成源分辨率 / 帧率（占位编码数据量大，取中小值保证连通性；
-/// 期二真实采屏按显示器分辨率、期三真编码后再提画质）。
+/// 帧率（真编码 + 真采屏按显示器分辨率出帧；占位构建用下方中小分辨率兜底，
+/// 因占位编码不压缩，全屏帧会产生数 MB 数据导致 QUIC 分片丢包）。
+#[cfg(not(feature = "openh264"))]
 const VIDEO_W: u32 = 640;
+#[cfg(not(feature = "openh264"))]
 const VIDEO_H: u32 = 360;
 const VIDEO_FPS: u32 = 15;
 
@@ -153,14 +155,15 @@ async fn serve_session(mut session: OneClickSession, device_code: String) {
     // 视频发流：用克隆的 VideoDatagramTx，独立任务按 fps 出帧。
     let tx = session.video_tx();
     let video_task: JoinHandle<()> = tokio::spawn(async move {
-        let mut pump = match VideoPump::new(
-            VIDEO_W,
-            VIDEO_H,
-            PumpConfig {
-                kind: 9,
-                fps: VIDEO_FPS,
-            },
-        ) {
+        let cfg = PumpConfig {
+            kind: 9,
+            fps: VIDEO_FPS,
+        };
+        #[cfg(feature = "openh264")]
+        let pump_result = VideoPump::new_platform(cfg);
+        #[cfg(not(feature = "openh264"))]
+        let pump_result = VideoPump::new(VIDEO_W, VIDEO_H, cfg);
+        let mut pump = match pump_result {
             Ok(p) => p,
             Err(e) => {
                 warn!(error = %e, "受控端视频泵 open 失败，停发流");

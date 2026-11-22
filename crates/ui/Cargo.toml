@@ -23,5 +23,11 @@ sha2 = { workspace = true }
 # 本机机器名（首次运行默认设备名；main/vendor 已含 0.2.x，离线安全）。
 libc = { workspace = true }
 
+[features]
+# 默认开启真编码 + 平台真实采屏：任意两端装 LanDesk GUI 即可互看真实桌面。
+# 关闭时退回占位编码 + 合成源（仅供离线逻辑测试）。
+default = ["openh264"]
+openh264 = ["landesk-core/openh264"]
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

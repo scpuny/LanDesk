@@ -353,9 +353,9 @@ function ensureDecoder(): boolean {
       },
     })
     decoder.configure({
-      codec: 'avc1.42c01f',      // H.264 baseline（PlaceholderEncoder 产出的裸 NALU 走此档）
-      codedWidth: w,
-      codedHeight: h,
+      codec: 'avc1.42c01f',      // H.264 baseline（openh264 真编码 / 占位后端均走此档）
+      // 不指定 codedWidth/codedHeight：受控端真采屏分辨率随显示器变化，
+      // 让解码器从码流 SPS 推断实际尺寸，避免配置与真实分辨率不符而解码失败。
       optimizeForLatency: true,
     })
     decoderReady = true

@@ -70,6 +70,12 @@ jobs:
         # rust-toolchain.toml 声明 stable，rustup 按文件自动安装
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup MSVC (openh264 真编码 C++ 构建需 cl.exe / lib.exe)
+        # landesk-ui 默认开启 openh264 feature → workspace build 会编译
+        # third_party/openh264 的 C++ 源码；Windows 需 MSVC 环境（默认 PATH 无 cl.exe）。
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Cache cargo target
         uses: actions/cache@v4
         with:

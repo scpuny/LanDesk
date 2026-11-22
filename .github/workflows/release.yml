@@ -219,6 +219,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup MSVC (openh264 真编码 C++ 构建需 cl.exe / lib.exe)
+        # GUI（--features tauri）经 landesk-ui 默认 feature 带 openh264，
+        # build.rs 会调 cl.exe / lib.exe 编 third_party/openh264；默认 PATH 无 MSVC。
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build CLI (x86_64, 主仓 vendor 离线)
         shell: bash
         run: |
