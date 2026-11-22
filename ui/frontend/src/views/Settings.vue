@@ -68,7 +68,7 @@ onMounted(loadConfig)
               <input v-model="config.password" :type="showPassword ? 'text' : 'password'" class="ll-input" @input="markDirty" />
               <span class="ll-input-affix ll-click" @click="showPassword = !showPassword"><Icon :name="showPassword ? 'eyeOff' : 'eye'" :size="15" /></span>
             </div>
-            <span class="ld-form-help">留空则不设置固定密码，仅使用临时密码</span>
+            <span class="ld-form-help">设置密码后，本机可被局域网内其他设备远程控制（画面 + 键鼠）；留空则本机仅作为控制端</span>
           </div>
         </div>
         <div class="ld-form-row">

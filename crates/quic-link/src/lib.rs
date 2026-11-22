@@ -23,7 +23,7 @@ pub mod relay;
 pub mod tls;
 
 pub use client::QuicClient;
-pub use conn::{QuicConnection, VideoDatagramRx};
+pub use conn::{QuicConnection, VideoDatagramRx, VideoDatagramTx};
 pub use error::QuicLinkError;
 pub use gcm::LpGcm;
 pub use insecure::TrustAny;

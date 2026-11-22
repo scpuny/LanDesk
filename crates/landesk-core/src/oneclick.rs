@@ -165,6 +165,14 @@ impl OneClickSession {
         self.conn.video_rx()
     }
 
+    /// 克隆出一个可独立持有的视频 Datagram **发送**句柄（`Send + Sync + 'static`）。
+    ///
+    /// 供受控端发流泵 `move` 进独立 `tokio` 任务——只发视频、不碰本会话控制流
+    /// 的 `&mut`，从而与键鼠控制帧接收循环（期四）并发运行。
+    pub fn video_tx(&self) -> quic_link::VideoDatagramTx {
+        self.conn.video_tx()
+    }
+
     /// 优雅关闭会话。
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.conn.close(code, reason);
