@@ -228,6 +228,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Git Bash 的 /usr/bin/link.exe（Unix link）会遮蔽 MSVC link.exe，导致
+          # rustc 链接时用错工具报 "extra operand"。把 MSVC bin 前置到 PATH 最前。
+          if [ -n "${VCToolsInstallDir:-}" ]; then
+            export PATH="$(cygpath -u "${VCToolsInstallDir}bin/Hostx64/x64"):$PATH"
+          fi
           ver="${GITHUB_REF_NAME#v}"
           cargo build --release --locked \
             -p controlled -p controller -p relay-server -p signaling-server
@@ -244,6 +249,10 @@ jobs:
         shell: bash
         run: |
           set -u
+          # 同 CLI 步骤：Git Bash 的 link.exe 会遮蔽 MSVC 链接器，前置 MSVC bin。
+          if [ -n "${VCToolsInstallDir:-}" ]; then
+            export PATH="$(cygpath -u "${VCToolsInstallDir}bin/Hostx64/x64"):$PATH"
+          fi
           ver="${GITHUB_REF_NAME#v}"
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
