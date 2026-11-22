@@ -8,6 +8,7 @@ description = "LanDesk GUI 服务层（M8，FR-08/09/11）：状态栏视图映�
 
 [dependencies]
 landesk-core = { workspace = true }
+input = { workspace = true }
 mdns = { workspace = true }
 ice = { workspace = true }
 quic-link = { workspace = true }

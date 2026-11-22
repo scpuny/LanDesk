@@ -189,12 +189,35 @@ async fn serve_session(mut session: OneClickSession, device_code: String) {
         }
     });
 
-    // 控制帧接收：session 本体独占 &mut，逐帧处理（期四键鼠注入接入点）。
+    // 控制帧接收：session 本体独占 &mut，逐帧把键鼠意图注入本机（FR-06）。
+    // 注入器构造失败（macOS 未授权辅助功能 / Linux 无 uinput 权限）→ 降级为只收不注入，
+    // 不影响视频发流与会话存活。
+    let injector = match input::platform_injector() {
+        Ok(i) => Some(i),
+        Err(e) => {
+            warn!(error = %e, "平台键鼠注入器不可用，受控端降级为只发画面");
+            None
+        }
+    };
+    let (screen_w, screen_h) = input::primary_screen_size();
     loop {
         match session.recv_control().await {
             Ok(msg) => {
-                debug!(?msg, "受控端收到控制帧");
-                // 期四：ControlMsg → landesk_core::apply_input(&injector, ...)
+                if let Some(ref inj) = injector {
+                    match landesk_core::apply_input(inj.as_ref(), &msg, screen_w, screen_h) {
+                        Ok(landesk_core::DispatchResult::Injected) => {
+                            debug!(?msg, "受控端注入输入帧");
+                        }
+                        Ok(skip) => {
+                            debug!(?skip, "受控端跳过未知输入帧");
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "受控端输入注入失败");
+                        }
+                    }
+                } else {
+                    debug!(?msg, "受控端收到控制帧（注入器不可用，未注入）");
+                }
             }
             Err(e) => {
                 debug!(error = %e, "受控端控制流结束");
