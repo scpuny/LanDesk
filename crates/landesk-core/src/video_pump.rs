@@ -52,10 +52,13 @@ pub struct VideoFrame {
 /// 可与其他控制帧并发。
 pub struct VideoPump {
     cfg: PumpConfig,
-    /// 合成画面源（无 OS 依赖；逐帧产真·变化像素，左上角烧录帧号）。
-    capture: SynthCapture,
-    /// 占位编码后端（Openh264 槽，1 帧进 = 1 NALU 出）。
+    /// 画面源：优先平台真实采屏，失败降级合成源（无 OS 依赖）。
+    capture: Box<dyn ScreenCapture>,
+    /// 占位编码后端（Openh264 槽，1 帧进 = 1 NALU 出；期三换真编码）。
     encoder: PlaceholderEncoder,
+    /// 实际采集分辨率（真实采屏取显示器尺寸，合成源取请求值）。
+    width: u32,
+    height: u32,
     /// 帧序号（喂 VideoDgram.seq，u16 循环空间）。
     seq: u16,
     /// 是否首帧（首帧强制 IDR + SPS/PPS，供对端解码器 flush + 重建参考帧）。
@@ -63,7 +66,11 @@ pub struct VideoPump {
 }
 
 impl VideoPump {
-    /// 在 `w×h` 分辨率上起泵（fps 见 [`PumpConfig`]）。`open` 编码器，失败即报错。
+    /// 在 `w×h` 分辨率上起泵（fps 见 [`PumpConfig`]），使用合成源。
+    ///
+    /// 占位编码阶段（期一/期二）不压缩，真实采屏的全屏帧会产生数 MB 数据、分片
+    /// 超出 QUIC datagram 容量而丢包——故默认用轻量合成源验证链路。期三真编码
+    /// 接入后由 [`Self::new_with_capture`] 切到平台真实采屏。
     pub fn new(w: u32, h: u32, cfg: PumpConfig) -> Result<Self, String> {
         let monitor = Monitor {
             index: 0,
@@ -71,20 +78,55 @@ impl VideoPump {
             height: h,
             name_hash: 0,
         };
+        Self::new_with_capture(Box::new(SynthCapture::default().with_monitor(monitor)), w, h, cfg)
+    }
+
+    /// 用指定采集器起泵（真实采屏接入点，期三真编码后启用）。
+    ///
+    /// 采集器分辨率由调用方按 `monitors()` 传入（通常与 w×h 一致）；编码器同分辨率打开。
+    pub fn new_with_capture(
+        capture: Box<dyn ScreenCapture>,
+        w: u32,
+        h: u32,
+        cfg: PumpConfig,
+    ) -> Result<Self, String> {
         let mut encoder = PlaceholderEncoder::new();
         encoder.open(w, h, cfg.fps).map_err(|e| e.to_string())?;
         Ok(Self {
             cfg,
-            capture: SynthCapture::default().with_monitor(monitor),
+            capture,
             encoder,
+            width: w,
+            height: h,
             seq: 0,
             first: true,
         })
     }
 
+    /// 当前实际采集分辨率。
+    pub fn resolution(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
     /// 产出一帧 NALU（采集一帧 → 占位编码 → 取 NALU）。首帧标 IDR+SPS/PPS，其后标 P 帧。
+    ///
+    /// 真实采屏在某帧失败（如屏幕录制权限被撤销、显示器休眠）→ 永久降级为同分辨率
+    /// 合成源，保证发流不中断（画面质量降级但会话仍在）。
     pub fn next_frame(&mut self) -> Result<VideoFrame, String> {
-        let frame = self.capture.grab(0).map_err(|e| e.to_string())?;
+        let frame = match self.capture.grab(0) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "真实采屏失败，降级为合成源");
+                let monitor = Monitor {
+                    index: 0,
+                    width: self.width,
+                    height: self.height,
+                    name_hash: 0,
+                };
+                self.capture = Box::new(SynthCapture::default().with_monitor(monitor));
+                self.capture.grab(0).map_err(|e| e.to_string())?
+            }
+        };
         self.encoder
             .send_frame(&frame.data)
             .map_err(|e| e.to_string())?;
