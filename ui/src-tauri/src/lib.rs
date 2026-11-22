@@ -50,8 +50,9 @@ pub mod state {
         /// `on_window_event(CloseRequested)` 放行；否则拦截并让前端弹二次确认。
         pub session_allow_close: std::sync::atomic::AtomicBool,
         /// mDNS 广播器（FR-01.1）：按本机配置宣告自己，让局域网其他端能发现。
-        /// 存进 state 仅为保活——drop 会发 mDNS goodbye 下线；无端可广播时为 `None`。
-        pub advertiser: Option<landesk_ui::Advertiser>,
+        /// Arc 供后台心跳任务持有——周期 reannounce 让对端刷新 last_seen，避免 TTL 过期后
+        /// 本机从对端设备列表消失；drop 最后一个 Arc 会发 mDNS goodbye 下线。无端可广播时为 None。
+        pub advertiser: Option<std::sync::Arc<landesk_ui::Advertiser>>,
         /// GUI 受控端（提醒4）：按设置页访问密码起 QUIC 服务端，接受远端键鼠控制。
         /// 存进 state 仅为保活 + 优雅下线（drop 时 abort accept 任务）；空密码为 `None`。
         pub controlled: Option<landesk_ui::ControlledHost>,
@@ -478,8 +479,15 @@ pub fn run() {
     use state::AppState;
 
     // 共享设备在线表（P1.1 下沉）：后台 mDNS 驱动 + `device_list` 命令读它。
-    let devices: std::sync::Arc<std::sync::Mutex<landesk_ui::DeviceTable>> =
-        Arc::new(std::sync::Mutex::new(landesk_ui::DeviceTable::new()));
+    let devices: std::sync::Arc<std::sync::Mutex<landesk_ui::DeviceTable>> = {
+        let mut table = landesk_ui::DeviceTable::new();
+        // 本机设备码：mDNS 会收到自己的宣告，入表时排除，避免"我的设备"列出自己连不上。
+        let store = landesk_ui::ConfigStore::new();
+        if let Ok(cfg) = store.load_or_init() {
+            table.set_local_code(landesk_ui::device_code_from(&cfg.device_name));
+        }
+        Arc::new(std::sync::Mutex::new(table))
+    };
 
     // 启动 mDNS 监听器（设备发现）。失败不致命（无网卡 / headless），降级空表。
     let listener = match landesk_ui::Listener::start() {
@@ -497,7 +505,7 @@ pub fn run() {
             Ok(cfg) if cfg.mdns_enabled => match landesk_ui::start_advertiser_default(&cfg) {
                 Ok(a) => {
                     eprintln!("landesk-app: mDNS 广播已启动（本机宣告 _landesk._tcp.local.）");
-                    Some(a)
+                    Some(Arc::new(a))
                 }
                 Err(e) => {
                     eprintln!("landesk-app: mDNS 广播启动失败，本机不被发现（{e}）");
@@ -530,6 +538,19 @@ pub fn run() {
             devices_bg.lock().unwrap().apply_snapshot(snap);
         }
     });
+
+    // mDNS 广播心跳：每 60s 重宣告一次，强制对端 listener 收到 ServiceResolved 刷新
+    // last_seen（TTL=180s，留 3 次冗余），避免组播刷新包偶发丢失导致本机从对端列表消失。
+    if let Some(adv) = advertiser.clone() {
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                if let Err(e) = adv.heartbeat() {
+                    eprintln!("landesk-app: mDNS 心跳重宣告失败（{e}）");
+                }
+            }
+        });
+    }
 
     // 共享日志环形缓冲（P2.7）：捕获层写入、`log_query`/`log_clear` 命令读写。
     let ring: std::sync::Arc<std::sync::Mutex<landesk_ui::LogRing>> =

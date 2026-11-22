@@ -26,10 +26,13 @@ function navigate(view: MainView): void {
   state.mainView = view
 }
 
-function startSession(target: SessionTarget | null, path: ConnMode = 'inner'): void {
+/** 发起会话。`phase='await-auth'`（Tauri 独立会话窗，真实建连）：置 idle+target，
+ *  停在「输入对方访问密码」页由用户确认后再真正建连；`'demo'`（浏览器预览）：置 auth
+ *  走演示动画。默认 demo 保持既有演示行为不变。 */
+function startSession(target: SessionTarget | null, path: ConnMode = 'inner', phase: 'demo' | 'await-auth' = 'demo'): void {
   state.sessionTarget = target
   state.path = path
-  state.sessionState = 'auth'
+  state.sessionState = phase === 'await-auth' ? 'idle' : 'auth'
   state.mainView = 'session'
 }
 
@@ -71,7 +74,7 @@ function resolveConfirm(ok: boolean): void {
 export interface UseUiReturn {
   state: UiState
   navigate: (view: MainView) => void
-  startSession: (target: SessionTarget | null, path?: ConnMode) => void
+  startSession: (target: SessionTarget | null, path?: ConnMode, phase?: 'demo' | 'await-auth') => void
   toasts: Ref<ToastItem[]>
   toast: typeof toast
   confirmRequest: Ref<ConfirmRequest | null>
