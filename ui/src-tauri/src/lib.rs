@@ -66,15 +66,15 @@ fn controlled_status() -> landesk_ui::ControlledStatus {
     let store = landesk_ui::ConfigStore::new();
     let cfg = store.load_or_init().unwrap_or_default();
     let device_code = landesk_ui::device_code_from(&cfg.device_name);
-    let serving = cfg
-        .password
-        .as_deref()
-        .map(|p| !p.trim().is_empty())
-        .unwrap_or(false);
+    // 双凭证门禁：访问密码非空 OR 临时通道开（默认开）→ serving。
+    // 根治「没设访问密码就只能当控制端 / 52000 nmap closed」：默认临时通道开，装了就能被临时码连。
+    let access_set = cfg.password.as_deref().map(|p| !p.trim().is_empty()).unwrap_or(false);
+    let serving = access_set || cfg.temp_password_enabled;
     landesk_ui::ControlledStatus {
         serving,
         port: landesk_ui::DEFAULT_PORT,
         device_code,
+        temp_code_enabled: cfg.temp_password_enabled,
     }
 }
 
@@ -141,11 +141,17 @@ fn choose_path(
 /// “发现到哪些远端设备”，用它推断本机在线会在局域网没有其他设备时错误显示“离线”。
 #[cfg(feature = "tauri")]
 #[tauri::command]
-fn local_info(_state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
+fn local_info(state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::LocalInfo, landesk_ui::StoreError> {
     let store = landesk_ui::ConfigStore::new();
     let cfg = store.load_or_init()?;
     let device_code = landesk_ui::device_code_from(&cfg.device_name);
-    let temp_password = landesk_ui::gen_temp_password();
+    // 临时密码读**受控端当前有效码**（与门禁同源，所见即可连——不再是每次随机的假码）；
+    // 无受控服务（双凭证都关）时回退 `gen_temp_password` 仅作预览。
+    let temp_password = state
+        .controlled
+        .as_ref()
+        .and_then(|h| h.current_temp_code())
+        .unwrap_or_else(landesk_ui::gen_temp_password);
     // 编码能力未接数据面探测，保守空值；mDNS/在线态均取本机配置。
     let mdns_advertising = cfg.mdns_enabled;
     let online = cfg.mdns_enabled;

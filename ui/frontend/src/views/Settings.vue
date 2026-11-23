@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 设置页：横向表单（label 左对齐固定宽 140px + 两列网格 + 长文本跨双列），对齐 V2 设计稿。
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { toast, confirm } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
 import type { Preset, LanDeskConfig } from '../types/index'
@@ -17,6 +17,19 @@ const presets: { v: Preset; label: string; sub: string }[] = [
   { v: 2, label: '高清 8M', sub: '高画质 / 局域网推荐' },
 ]
 const logLevels: LanDeskConfig['log_level'][] = ['Info', 'Debug', 'Warn', 'Error']
+
+/** 临时密码通道开关：`undefined` 视作默认开（与后端 `serde(default=true)` 一致）。 */
+const tempEnabled = computed({
+  get: () => config.temp_password_enabled ?? true,
+  set: (v: boolean) => {
+    config.temp_password_enabled = v
+  },
+})
+const tempTtlOptions = [
+  { v: 300, label: '5 分钟' },
+  { v: 900, label: '15 分钟' },
+  { v: 3600, label: '1 小时' },
+]
 
 function markDirty() { dirty.value = true }
 function pickPreset(v: Preset) { config.preset = v; markDirty() }
@@ -68,7 +81,23 @@ onMounted(loadConfig)
               <input v-model="config.password" :type="showPassword ? 'text' : 'password'" class="ll-input" @input="markDirty" />
               <span class="ll-input-affix ll-click" @click="showPassword = !showPassword"><Icon :name="showPassword ? 'eyeOff' : 'eye'" :size="15" /></span>
             </div>
-            <span class="ld-form-help">设置密码后，本机可被局域网内其他设备远程控制（画面 + 键鼠）；留空则本机仅作为控制端</span>
+            <span class="ld-form-help">设置密码后，本机可被局域网内其他设备用「访问密码」连接（长期身份凭证）。留空也可被连——见下方「临时密码通道」。</span>
+          </div>
+        </div>
+        <div class="ld-form-row">
+          <div class="ld-form-row__label">临时密码通道<small>一次性配对码</small></div>
+          <div class="ld-form-row__control">
+            <button class="ll-switch" :data-on="tempEnabled" @click="tempEnabled = !tempEnabled; markDirty()" />
+            <span class="ld-form-help">开启后本机可随时生成 6 位临时码，给「临时放别人进来」用；与访问密码是<strong>两道独立门</strong>，任一通过即可连接。默认开启。</span>
+          </div>
+        </div>
+        <div class="ld-form-row">
+          <div class="ld-form-row__label">临时码有效期<small>到期自动换新</small></div>
+          <div class="ld-form-row__control">
+            <button v-for="o in tempTtlOptions" :key="o.v" class="ld-chip-opt" :class="{ 'is-active': config.temp_password_ttl_secs === o.v }" :disabled="!tempEnabled" @click="config.temp_password_ttl_secs = o.v; markDirty()">
+              {{ o.label }}
+            </button>
+            <span class="ld-form-help">到达有效期后受控端自动换新码，旧码作废——临时授权不会长期留口。</span>
           </div>
         </div>
         <div class="ld-form-row">
