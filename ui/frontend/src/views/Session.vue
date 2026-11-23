@@ -60,6 +60,18 @@ const showDegradedBanner = computed(() =>
   state.metrics.encoder === 'OpenH264' && state.metrics.reset > 0 && !degradedBannerDismissed.value)
 function dismissDegradedBanner(): void { degradedBannerDismissed.value = true }
 
+// 采集降级 banner（问题 2/5）：受控端经视频帧 flags 带内上报 reason，前端逐帧更新。
+// 0=对方未授予屏幕录制权限(macOS) / 1=对方锁屏或非交互桌面(Windows)；null=真实画面。
+const captureDegraded = ref<number | null>(null)
+const captureDegradedDismissed = ref(false)
+const captureDegradedText = computed(() => {
+  if (captureDegraded.value === 0) return '对方屏幕未能采集（可能未授予屏幕录制权限），当前显示的是测试画面。请在被控端系统设置中为 LanDesk 开启「屏幕录制」权限。'
+  if (captureDegraded.value === 1) return '对方处于锁屏或非交互桌面，无法采集真实画面，当前显示测试画面。请在被控端登录后重试。'
+  return ''
+})
+const showCaptureDegradedBanner = computed(() =>
+  captureDegraded.value !== null && !captureDegradedDismissed.value && state.sessionState === 'running')
+
 // #87：重连进度优先取后端 `liveSession` 真实退避（`reconnectAttempt/Max/WaitSecs/Label`），
 // 非 live 演示态回退本地 `retryAttempt`/`reconnectPlan` 计数（保留预览体验）。
 const reconnectAttempt = computed(() => liveSession.value?.reconnectAttempt || Math.min(retryAttempt.value, maxAttempts.value))
@@ -402,6 +414,12 @@ function ensureDecoder(): boolean {
  *  仅 live 运行态处理；IDR 关键帧以 `type:'key'` 喂入（WebCodecs 据此重建解码上下文）。 */
 function onVideoFrame(f: VideoFrameMsg): void {
   if (!isLive.value || state.sessionState !== 'running') return
+  // 采集降级状态随帧带内到达：降级帧上报 reason，正常帧（undefined）自动清除（权限补授/解锁后恢复）。
+  const degraded = f.captureDegraded ?? null
+  if (degraded !== captureDegraded.value) {
+    captureDegraded.value = degraded
+    if (degraded === null) captureDegradedDismissed.value = false // 恢复后可再次提示未来降级
+  }
   if (!ensureDecoder()) return
   if (!decoder || decoder.state === 'closed') return
   const data = b64ToBytes(f.nalu)
@@ -619,8 +637,13 @@ onBeforeUnmount(() => {
         />
         <!-- 运行态专属 chrome：悬浮工具栏 / 顶部标签 / 降级 banner / 底部提示（重连中隐藏，让位给重连浮层）。 -->
         <template v-if="state.sessionState === 'running'">
-          <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · 自适应画质 · 60fps</div>
+          <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · {{ scaleMode }}画质</div>
           <div style="position:absolute;top:14px;right:16px;font-size:12px;color:#e8edf5;opacity:.8;display:flex;align-items:center;gap:6px"><Icon name="shield" :size="13" /> QUIC + AES-256-GCM 加密通话</div>
+          <!-- 采集降级（问题 2/5）：对方屏幕未采集成功，当前是测试画面——醒目提示，避免误认真桌面。 -->
+          <div class="ld-sess-warnbar ld-sess-warnbar--capture" v-if="showCaptureDegradedBanner">
+            <Icon name="alertTriangle" :size="14" /> {{ captureDegradedText }}
+            <button @click="captureDegradedDismissed = true"><Icon name="close" :size="13" /></button>
+          </div>
           <div class="ld-sess-warnbar" v-if="showDegradedBanner">
             <Icon name="alertTriangle" :size="14" /> 硬件编码不可用，已切换 OpenH264，会话保持不中断 · 重置 ×{{ state.metrics.reset }}
             <button @click="dismissDegradedBanner"><Icon name="close" :size="13" /></button>

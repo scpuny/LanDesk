@@ -43,6 +43,30 @@ impl NaluKind {
 /// flags 位定义（对齐 protocol.md §2.2）。
 pub const FLAG_FIRST: u8 = 0b01; // 解码器 flush 用
 pub const FLAG_STALE_DROP: u8 = 0b10; // 接收端标记：过期帧可丢
+/// 受控端采集降级标志（问题 2/5）：置位表示当前画面来自合成源、非真实桌面。
+/// 经视频 Datagram 带内上报（控制端视频泵任务无需 `&mut session`，避免与 send 争锁）。
+pub const FLAG_CAPTURE_DEGRADED: u8 = 0b100;
+/// 降级原因位（仅 [`FLAG_CAPTURE_DEGRADED`] 置位时有意义）：1=连续黑帧(Windows 锁屏/非交互)，
+/// 0=采屏构造失败(macOS 无屏幕录制权限)。
+pub const FLAG_DEGRADED_REASON: u8 = 0b1000;
+
+/// 从 flags 解析采集降级状态：`Some(reason码)` 表示降级（0=no_permission / 1=blank_frame），`None` 正常。
+pub fn capture_degraded_from_flags(flags: u8) -> Option<u8> {
+    if flags & FLAG_CAPTURE_DEGRADED != 0 {
+        Some(if flags & FLAG_DEGRADED_REASON != 0 { 1 } else { 0 })
+    } else {
+        None
+    }
+}
+
+/// 构造携带降级状态的 flags（供发送端按 degraded 状态组合）。
+pub fn flags_with_degraded(base: u8, degraded_reason: Option<u8>) -> u8 {
+    match degraded_reason {
+        None => base,
+        Some(0) => base | FLAG_CAPTURE_DEGRADED,
+        Some(_) => base | FLAG_CAPTURE_DEGRADED | FLAG_DEGRADED_REASON,
+    }
+}
 
 /// 视频 Datagram 明文体。
 ///
@@ -245,5 +269,16 @@ mod tests {
             "满片编码 {}B 超 quinn 可发下限",
             enc.len()
         );
+    }
+
+    /// 采集降级标志带内编解码（问题 2/5）：reason 0/1 与正常态需正确往返，且不污染 FLAG_FIRST。
+    #[test]
+    fn capture_degraded_flags_roundtrip() {
+        use super::{capture_degraded_from_flags, flags_with_degraded, FLAG_FIRST};
+        assert_eq!(capture_degraded_from_flags(FLAG_FIRST), None, "正常帧无降级");
+        assert_eq!(capture_degraded_from_flags(flags_with_degraded(FLAG_FIRST, Some(0))), Some(0));
+        assert_eq!(capture_degraded_from_flags(flags_with_degraded(0, Some(1))), Some(1));
+        let f = flags_with_degraded(FLAG_FIRST, Some(1));
+        assert!(f & FLAG_FIRST != 0, "降级标志不覆盖 FLAG_FIRST");
     }
 }

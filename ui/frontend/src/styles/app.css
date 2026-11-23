@@ -451,6 +451,12 @@
   font-size: var(--ll-fs-sm); z-index: 3; box-shadow: var(--ll-shadow-pop);
 }
 .ld-sess-warnbar button { border: none; background: transparent; color: inherit; display: inline-flex; }
+/* 采集降级 banner（问题 2/5）：红色警示 + 允许长文案换行（比编码降级更严重——画面根本不是真实桌面）。 */
+.ld-sess-warnbar--capture {
+  top: var(--ll-space-3); border-radius: var(--ll-radius-md); max-width: min(760px, 92%);
+  background: var(--ll-color-danger-light); color: var(--ll-color-danger-hover);
+  line-height: var(--ll-lh-relaxed); text-align: left;
+}
 .ld-sess-toolrail {
   position: absolute; left: var(--ll-space-3); top: 50%; transform: translateY(-50%);
   display: flex; flex-direction: column; gap: 2px; padding: var(--ll-space-2);

@@ -25,7 +25,7 @@ use quic_link::VideoDatagramTx;
 
 use crate::error::CoreError;
 use crate::oneclick::OneClickSession;
-use lp::datagram::{NaluKind, VideoDgram, FLAG_FIRST};
+use lp::datagram::{flags_with_degraded, NaluKind, VideoDgram, FLAG_FIRST};
 
 /// 发流参数（环回测试 / 生产默认值）。
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +66,13 @@ impl DegradedReason {
         match self {
             DegradedReason::NoPermission => "no_permission",
             DegradedReason::BlankFrame => "blank_frame",
+        }
+    }
+    /// 视频 datagram flags 里的 reason 码（0=no_permission / 1=blank_frame）。
+    pub fn flag_code(self) -> u8 {
+        match self {
+            DegradedReason::NoPermission => 0,
+            DegradedReason::BlankFrame => 1,
         }
     }
 }
@@ -366,13 +373,20 @@ impl VideoPump {
     }
 
     /// 把一帧 NALU 分片（首片置 FLAG_FIRST）。递增 seq，返回分片列表。
+    /// ★ 降级态在每帧 flags 带内上报（含 reason），控制端视频泵据此显示 banner。
     fn fragment(&mut self, vf: &VideoFrame) -> Vec<VideoDgram> {
         self.seq = self.seq.wrapping_add(1);
-        let flags = if vf.kind == NaluKind::IdrWithSpsPps as u8 {
+        let base = if vf.kind == NaluKind::IdrWithSpsPps as u8 {
             FLAG_FIRST
         } else {
             0
         };
+        let degraded_reason = if self.degraded {
+            self.degraded_reason.map(|r| r.flag_code())
+        } else {
+            None
+        };
+        let flags = flags_with_degraded(base, degraded_reason);
         VideoDgram::fragment_nalu(&vf.nalu, self.seq, vf.kind, flags)
     }
 
