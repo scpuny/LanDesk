@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// 我的设备页（选择侧）：局域网设备列表。点击设备卡发起连接 → `launchSession`
-// （Tauri 开独立会话 OS 窗 / 浏览器开单页沉浸 session）。发起侧（快速连接 + 本机卡）已拆到 Remote 页。
+// 我的设备页（选择侧）：局域网设备列表。点卡片上的「连接」按钮发起连接 →
+// `launchSession`（Tauri 开独立会话 OS 窗 / 浏览器开单页沉浸 session）。
+// 卡片本体不可点（避免误触弹会话窗），只有显式「连接」按钮发起。
+// 发起侧（快速连接 + 本机卡）已拆到 Remote 页。
 import { ref, computed, onMounted } from 'vue'
 import { toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
@@ -66,7 +68,8 @@ onMounted(() => { loadDevices(); loadLocal() })
         </EmptyState>
       </div>
       <div v-else class="ld-dev-grid">
-        <article v-for="d in filtered" :key="d.id" class="ld-dev-card" :class="{ 'is-offline': !d.online }" @click="connect(d)">
+        <!-- 卡片本体不可点（避免误触弹会话窗）；连接只从卡片内显式「连接」按钮发起 -->
+        <article v-for="d in filtered" :key="d.id" class="ld-dev-card" :class="{ 'is-offline': !d.online }">
           <div class="ld-dev-card__top">
             <span class="ld-dev-card__icon"><Icon :name="kindIcon(d.kind)" :size="20" /></span>
             <div class="ld-dev-card__id">
@@ -99,7 +102,7 @@ onMounted(() => { loadDevices(); loadLocal() })
         <span>局域网发现 {{ devices.length }} 台</span>
         <span>在线可连 {{ onlineCount }} 台</span>
         <span>上次扫描 刚刚</span>
-        <span class="ld-footbar__hint">点击设备卡任意位置即可快速连接</span>
+        <span class="ld-footbar__hint">点击卡片上的「连接」按钮发起会话（卡片本体不可点）</span>
       </div>
     </section>
   </div>

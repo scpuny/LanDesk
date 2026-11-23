@@ -215,7 +215,7 @@
   display: flex; flex-direction: column; gap: 10px;
   padding: var(--ll-space-5); border: 1px solid var(--ll-color-border);
   border-radius: var(--ll-radius-md); background: var(--ll-color-surface);
-  box-shadow: var(--ll-shadow-1); cursor: pointer;
+  box-shadow: var(--ll-shadow-1);
   transition: transform var(--ll-duration-fast), box-shadow var(--ll-duration-fast), border-color var(--ll-duration-fast);
 }
 .ld-dev-card:hover { transform: translateY(-2px); box-shadow: var(--ll-shadow-3); border-color: var(--ll-color-brand); }
