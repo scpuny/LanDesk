@@ -34,3 +34,8 @@ thirdparty/
 
 # 内部工作区数据
 .workbuddy/
+
+# 误生成的根目录空 package-lock.json（真实前端 lock 在 ui/frontend/，已被跟踪）
+/package-lock.json
+# 根目录散放的设计参考图（reconnecting.png / authfail.png / establishing.png 等）
+/*.png
