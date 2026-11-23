@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use quinn::rustls::crypto::CryptoProvider;
 use quinn::rustls::RootCertStore;
-use quinn::{ClientConfig, Endpoint, TransportConfig};
+use quinn::{ClientConfig, Endpoint};
 
 use crate::conn::QuicConnection;
 use crate::error::QuicLinkError;
@@ -40,7 +40,7 @@ impl QuicClient {
 
         let mut client_config = ClientConfig::with_root_certificates(Arc::new(roots))
             .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
-        client_config.transport_config(Arc::new(TransportConfig::default()));
+        client_config.transport_config(Arc::new(crate::transport_config()));
 
         let mut endpoint =
             Endpoint::client(bind).map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
@@ -62,7 +62,7 @@ impl QuicClient {
             insecure::insecure_client_config(provider)
                 .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
         let mut client_config = client_config;
-        client_config.transport_config(Arc::new(TransportConfig::default()));
+        client_config.transport_config(Arc::new(crate::transport_config()));
 
         let mut endpoint =
             Endpoint::client(bind).map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
