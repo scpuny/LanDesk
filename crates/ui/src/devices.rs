@@ -24,7 +24,7 @@ pub struct DeviceRow {
     pub name: String,
     /// 实例名（`name@id后6位`）。
     pub instance: String,
-    /// QUIC 端点 `ip:port`（拨号目标）。
+    /// QUIC 端点 `ip:port`（拨号目标；IPv6 显示为 `[ip]:port`）。
     pub addr: String,
     /// 主分辨率。
     pub res: String,
@@ -34,6 +34,15 @@ pub struct DeviceRow {
     pub relay: bool,
     /// 最后刷新（epoch 秒）。
     pub last_seen: u64,
+}
+
+/// 组设备列表展示用端点串：IPv6 加 `[ ]`（`[fe80::...]:52000`），IPv4 原样 `ip:port`。
+/// 仅作**展示**用；真正拨号由 [`crate::manager`] 经 `SocketAddr` 正确组装，与此无关。
+fn dial_addr(ip: &str, port: u16) -> String {
+    match ip.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(_)) => format!("[{ip}]:{port}"),
+        _ => format!("{ip}:{port}"),
+    }
 }
 
 /// 从在线设备列表构建排序后的行视图（FR-01.4：先 TTL 剪枝，再按名排序）。
@@ -48,7 +57,7 @@ pub fn device_rows(devices: &mut Vec<OnlineDevice>, now: u64) -> Vec<DeviceRow> 
             id: d.ad.id.clone(),
             name: d.ad.name.clone(),
             instance: d.ad.instance_name(),
-            addr: format!("{}:{}", d.ip, d.port),
+            addr: dial_addr(&d.ip, d.port),
             res: d.ad.res.clone(),
             enc: d.ad.enc.clone(),
             relay: d.ad.relay,
@@ -231,5 +240,23 @@ mod tests {
         t.apply_snapshot(vec![dev("c", "ccc", "10.0.0.7", now, false)]);
         assert_eq!(t.len(), 1, "快照整体替换（镜像）");
         assert_eq!(t.rows(now)[0].name, "ccc");
+    }
+
+    #[test]
+    fn dial_addr_brackets_ipv6_not_ipv4() {
+        // IPv4 原样 `ip:port`；IPv6 加 `[ ]`（`[ip]:port`）——展示用。
+        assert_eq!(dial_addr("192.168.5.249", 52000), "192.168.5.249:52000");
+        assert_eq!(dial_addr("fe80::5b1a:274c:cd6b:fe29", 52000), "[fe80::5b1a:274c:cd6b:fe29]:52000");
+        // 空/坏串不崩，退化为原样拼接（调用方保证 ip 已 pick_dialable_ip 过滤）。
+        assert_eq!(dial_addr("", 52000), ":52000");
+    }
+
+    #[test]
+    fn device_row_addr_brackets_ipv6() {
+        // device_rows 出参 addr 对 IPv6 也加 [ ]（喂前端 DeviceList 展示）。
+        let now = t_now();
+        let mut ds = vec![dev("a", "v6-peer", "240e:461:2c9e::1", now, false)];
+        let rows = device_rows(&mut ds, now);
+        assert_eq!(rows[0].addr, "[240e:461:2c9e::1]:52000");
     }
 }

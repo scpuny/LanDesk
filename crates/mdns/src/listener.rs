@@ -89,10 +89,7 @@ impl Listener {
                 return;
             }
         };
-        let ip = info
-            .get_addresses()
-            .iter()
-            .next()
+        let ip = crate::pick_dialable_ip(info.get_addresses())
             .map(|ip| ip.to_string())
             .unwrap_or_default();
         let port = info.get_port();
