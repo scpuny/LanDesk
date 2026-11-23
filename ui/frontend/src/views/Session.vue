@@ -505,6 +505,8 @@ watch(() => state.sessionState, (s) => {
   } else {
     stopVideo()
     stopMetrics()
+    captureDegraded.value = null // 离开会话清采集降级态，避免下次连接空档闪现旧 banner
+    captureDegradedDismissed.value = false
   }
 })
 
