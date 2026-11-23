@@ -162,6 +162,10 @@ export interface LanDeskConfig {
   stun_enabled?: boolean
   stun_url: string | null
   log_level: 'Info' | 'Debug' | 'Warn' | 'Error'
+  /** 临时密码通道开关（默认开；开则装了且开着的机器随时可被临时码连接，无需设访问密码）。 */
+  temp_password_enabled?: boolean
+  /** 临时密码自动过期时长（秒，默认 300；最小 30）。 */
+  temp_password_ttl_secs?: number
 }
 
 /** 本机信息 */
@@ -174,6 +178,17 @@ export interface LocalInfo {
   relay: boolean
   enc: string[]
   online: boolean
+}
+
+/** 受控服务状态（对齐后端 `ui::ControlledStatus`，camelCase 出参）。
+ *  `serving` = 访问密码非空 **或** 临时码通道开（`serving_for`），二者任一为真即 52000 监听；
+ *  `false` 表示本机未起受控服务（mDNS 仍可广播被发现，但 52000 无人接 → 控制端 QUIC 拨号超时）。
+ *  `tempCodeEnabled` 供前端提示「临时码可用 / 仅访问密码」。 */
+export interface ControlledStatus {
+  serving: boolean
+  port: number
+  deviceCode: string
+  tempCodeEnabled?: boolean
 }
 
 /** Toast 提示 */

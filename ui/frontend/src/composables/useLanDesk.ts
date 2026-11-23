@@ -5,6 +5,7 @@ import {
 } from '../lib/landesk'
 import type {
   DeviceRow, DeviceKind, LanDeskConfig, LogLine, LocalInfo, SessionStatus, ControlAction, VideoFrameMsg,
+  ControlledStatus,
 } from '../types/index'
 
 // live 判定：Tauri（withGlobalTauri 注入 __TAURI__）或显式 __LANDesk_live__===true 可同步可知；
@@ -39,6 +40,7 @@ const mockConfig: LanDeskConfig = {
   mdns_enabled: true, signaling_enabled: true, signaling_url: 'ws://host:8443/ws',
   relay_enabled: true, relay_url: 'turn://relay.lan:3479',
   stun_enabled: true, stun_url: 'udp://lan:3478', log_level: 'Info',
+  temp_password_enabled: true, temp_password_ttl_secs: 300,
 }
 
 const mockLogs: LogLine[] = [
@@ -58,6 +60,10 @@ const local = reactive<LocalInfo>({
   name: '我的工作机', deviceCode: '83FA217C', tempPassword: '629418',
   mdns: true, signaling: 'ws://lan:8443', relay: true, enc: ['QSV', 'VAAPI'], online: true,
 })
+
+// 受控服务状态（serving = 访问密码非空且 52000 监听成功）：区分 mDNS「在线」与真能连接。
+// 默认全 false（未知/未连），live 拉取后端 `controlled_status` 回填；非 live 保持 false 预览。
+const controlled = reactive<ControlledStatus>({ serving: false, port: 52000, deviceCode: '' })
 
 const devices: Ref<DeviceRow[]> = ref<DeviceRow[]>([...mockDevices])
 const deviceLoading = ref<boolean>(false)
@@ -107,7 +113,12 @@ async function loadConfig(): Promise<void> {
   configError.value = ''
   try {
     const c = await landesk.configLoadOrInit()
-    if (c) Object.assign(config, c)
+    if (c) {
+      Object.assign(config, c)
+      // 旧后端可能没带这两个字段 → 回填默认，保证保存时一定写出完整配置。
+      if (config.temp_password_enabled === undefined) config.temp_password_enabled = true
+      if (config.temp_password_ttl_secs === undefined) config.temp_password_ttl_secs = 300
+    }
   } catch {
     configError.value = '配置读取失败，当前显示默认值（可能无法反映真实运行参数）'
     Object.assign(config, mockConfig)
@@ -129,6 +140,14 @@ function refreshTempPassword(): void {
   }
   const n = Math.floor(100000 + Math.random() * 900000)
   local.tempPassword = String(n)
+}
+
+// 受控服务状态（区分 mDNS「在线」与真能在 52000 接受连接）：live 走后端 `controlledStatus()`
+// （访问密码非空 → serving=true），非 live 保持默认 false（预览态不骗「可被连接」）。
+async function loadControlledStatus(): Promise<void> {
+  if (!(await ensureLive())) { controlled.serving = false; return }
+  try { Object.assign(controlled, await landesk.controlledStatus()) }
+  catch { /* 保留默认 false，不冒充当「可被连接」 */ }
 }
 
 // 本机信息（P2.8）：live 走后端 `localInfo()`（设备码 FNV 派生 + 临时密码 6 位），非 live 保留 mock。
@@ -273,6 +292,8 @@ export interface UseLanDeskReturn {
   isLive: Ref<boolean>
   local: LocalInfo
   loadLocal: () => Promise<void>
+  controlled: ControlledStatus
+  loadControlledStatus: () => Promise<void>
   devices: Ref<DeviceRow[]>
   deviceLoading: Ref<boolean>
   loadDevices: () => Promise<void>
@@ -301,6 +322,7 @@ export interface UseLanDeskReturn {
 export function useLanDesk(): UseLanDeskReturn {
   return {
     isLive, local, loadLocal,
+    controlled, loadControlledStatus,
     devices, deviceLoading, loadDevices,
     config, configLoading, configError, loadConfig, saveConfig,
     reconnectPlan, loadReconnectPlan,
