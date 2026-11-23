@@ -10,7 +10,7 @@ import { launchSession, recentTargets, loadRecentTargets } from '../composables/
 import Icon from '../components/common/Icon.vue'
 
 const { navigate } = useUi()
-const { local, refreshTempPassword, loadLocal, config, saveConfig, isLive } = useLanDesk()
+const { local, refreshTempPassword, loadLocal, loadControlledStatus, controlled, config, saveConfig, isLive } = useLanDesk()
 const quickCode = ref('')
 /** 最近连接：本机真实发起过的目标（localStorage），按最近时间倒序。 */
 const history = recentTargets
@@ -63,7 +63,7 @@ async function commitName() {
 
 function cancelEditName() { editingName.value = false }
 
-onMounted(() => { loadLocal(); loadRecentTargets() })
+onMounted(() => { loadLocal(); loadControlledStatus(); loadRecentTargets() })
 </script>
 
 <template>
@@ -122,7 +122,15 @@ onMounted(() => { loadLocal(); loadRecentTargets() })
                   </button>
                 </template>
               </div>
-              <div class="ld-local__online"><span class="ll-dot" :class="local.online ? 'll-dot--success' : ''" /> {{ local.online ? '在线 · 可被连接' : '离线' }}</div>
+              <div class="ld-local__online">
+                <span class="ll-dot" :class="local.online ? 'll-dot--success' : ''" /> {{ local.online ? '在线' : '离线' }}
+                <template v-if="local.online">
+                  <template v-if="isLive && !controlled.serving">
+                    <span class="ll-dot ll-dot--idle" style="margin-left:8px" /> 未开启受控服务
+                  </template>
+                  <span v-else class="ll-dot ll-dot--success" style="margin-left:8px" /> 可被连接
+                </template>
+              </div>
             </div>
           </div>
 
@@ -153,6 +161,7 @@ onMounted(() => { loadLocal(); loadRecentTargets() })
       <section class="ld-dev-section">
         <section class="ld-card ld-card__pad ld-info-card">
           <div class="ld-info-card__title">本机运行信息</div>
+          <div class="ld-kvline"><span class="ld-kvline__k">受控服务</span><span class="ld-kvline__v"><span class="ll-dot" :class="controlled.serving ? 'll-dot--success' : 'll-dot--idle'" /> {{ controlled.serving ? `监听 52000 · 可被连接` : '未开启（需填访问密码）' }}</span></div>
           <div class="ld-kvline"><span class="ld-kvline__k">mDNS 发现</span><span class="ld-kvline__v"><span class="ll-dot" :class="local.mdns ? 'll-dot--success' : 'll-dot--idle'" /> {{ local.mdns ? '已启用' : '未启用' }}</span></div>
           <div class="ld-kvline"><span class="ld-kvline__k">信令服务</span><span class="ld-kvline__v ld-mono">{{ local.signaling || '未配置' }}</span></div>
           <div class="ld-kvline"><span class="ld-kvline__k">中继服务</span><span class="ld-kvline__v"><span class="ll-dot" :class="local.relay ? 'll-dot--success' : 'll-dot--idle'" /> {{ local.relay ? '可用' : '不可用' }}</span></div>

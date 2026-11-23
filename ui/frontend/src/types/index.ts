@@ -176,6 +176,15 @@ export interface LocalInfo {
   online: boolean
 }
 
+/** 受控服务状态（对齐后端 `ui::ControlledStatus`，camelCase 出参）。
+ *  `serving` = 访问密码非空且 52000 监听成功；`false` 表示本机未起受控服务
+ * （mDNS 仍可广播被发现，但 52000 无人接 → 控制端 QUIC 拨号超时）。 */
+export interface ControlledStatus {
+  serving: boolean
+  port: number
+  deviceCode: string
+}
+
 /** Toast 提示 */
 export interface ToastItem {
   id: number
