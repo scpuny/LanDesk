@@ -353,18 +353,28 @@
   background: var(--ll-session-canvas); color: var(--ll-session-text); overflow: hidden;
 }
 .ld-sess-top {
+  --ld-titlebar-traffic-w: 80px; /* macOS 交通灯宽度 token；窄窗下可覆写 */
   height: 48px; flex: none; display: flex; align-items: center; gap: var(--ll-space-3);
   /* 左 16 / 右 0：窗口三键贴右上角（对齐 Windows 标题栏习惯）。 */
   padding: 0 0 0 var(--ll-space-4); background: var(--ll-session-chrome);
-  border-bottom: 1px solid var(--ll-session-chrome-strong); z-index: 2;
+  border-bottom: 1px solid var(--ll-session-chrome-strong); z-index: 2; min-width: 0;
 }
 /* 自绘主窗体 macOS（交通灯 overlay）：会话顶栏左侧留白避开原生交通灯（三键宽约 78px）。
    Win/Linux（decorations:false）不套此类 —— 窗口三键在右侧。 */
-.ld-sess-top--mac { padding-left: 80px; }
-.ld-sess-state { display: inline-flex; align-items: center; gap: var(--ll-space-2); font-size: var(--ll-fs-sm); font-weight: var(--ll-fw-medium); }
-.ld-sess-target { display: inline-flex; align-items: center; gap: var(--ll-space-2); color: var(--ll-session-text-dim); font-size: var(--ll-fs-sm); }
-.ld-sess-top__spacer { flex: 1; }
-.ld-sess-tools { display: flex; align-items: center; gap: 2px; }
+.ld-sess-top--mac { padding-left: var(--ld-titlebar-traffic-w); }
+.ld-sess-state { flex: none; display: inline-flex; align-items: center; gap: var(--ll-space-2); font-size: var(--ll-fs-sm); font-weight: var(--ll-fw-medium); }
+/* 目标名可收缩省略：窗口变窄或 macOS 左侧留白挤出时，优先压缩此处而非把右侧工具顶出边界。 */
+.ld-sess-target {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--ll-space-2); color: var(--ll-session-text-dim); font-size: var(--ll-fs-sm);
+}
+.ld-sess-top__spacer { flex: 0 0 0; }
+.ld-sess-tools { flex: none; display: flex; align-items: center; gap: 2px; }
+/* 窄窗（会话窗最小约 720px）：macOS 左侧留白收窄，分辨率标签隐藏，避免右侧工具被挤出。 */
+@media (max-width: 900px) {
+  .ld-sess-top { --ld-titlebar-traffic-w: 72px; }
+  .ld-sess-target .ld-mono { display: none; }
+}
 .ld-sess-tool {
   height: 32px; padding: 0 var(--ll-space-3); display: inline-flex; align-items: center; gap: 6px;
   border: none; border-radius: var(--ll-radius-xs); background: transparent;
