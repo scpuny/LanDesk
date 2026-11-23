@@ -213,7 +213,10 @@ async fn session_connect(
         Some(d) => match mgr.connect(d, &password, &sni).await {
             Ok(v) => landesk_ui::SessionResp::ok(v),
             Err(e) => {
-                tracing::warn!(%device_id, error = %e, "会话建立失败");
+                // 带目标 IP:port 与可选平台提示：设备已发现却 unreachable/超时，
+                // 是对端防火墙拦截 UDP 入站（问题 4）的关键诊断证据。
+                let target = if d.ip.is_empty() { format!("relay:{}", d.port) } else { format!("{}:{}", d.ip, d.port) };
+                tracing::warn!(%device_id, %target, error = %e, "会话建立失败（若 unreachable 且可发现设备，疑对端防火墙拦 UDP 入站）");
                 landesk_ui::SessionResp::fail(Some(mgr.status_view()), e.to_string())
             }
         },

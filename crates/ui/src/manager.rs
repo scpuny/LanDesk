@@ -66,6 +66,9 @@ pub struct SessionManager {
     last_sni: String,
     /// 用户已主动 `close`：置 `true` 时重连主管停止（避免「已断开」又自动拨号回来）。
     reconnect_stopped: bool,
+    /// 上一次视频帧携带的采集降级码（`None`=正常）。仅用于 `poll_video` 里状态跳变时
+    /// 记一条日志，避免逐帧刷屏；诊断包据此还原"对方采屏降级"这一关键运行期证据。
+    last_degraded: Option<u8>,
 }
 
 /// `send_control` 的宿主级错误（无活跃会话 / 展开失败 / 底层会话错）。
@@ -139,6 +142,7 @@ impl SessionManager {
             last_password: String::new(),
             last_sni: String::new(),
             reconnect_stopped: false,
+            last_degraded: None,
         }
     }
 
@@ -193,6 +197,17 @@ impl SessionManager {
         };
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
+            // 采集降级码跳变才记一条（逐帧记会淹没 ring）：0=对方无屏幕录制权限，
+            // 1=对方锁屏/非交互桌面黑帧。诊断包靠这条定位问题 2/5。
+            if msg.capture_degraded != self.last_degraded {
+                match msg.capture_degraded {
+                    Some(0) => tracing::warn!(code = 0, "对端采集降级：疑似未授予屏幕录制权限，当前显示测试画面"),
+                    Some(1) => tracing::warn!(code = 1, "对端采集降级：疑似锁屏/非交互桌面黑帧，当前显示测试画面"),
+                    Some(n) => tracing::warn!(code = n, "对端采集降级：未知原因码"),
+                    None => tracing::info!("对端采集恢复正常，退出降级态"),
+                }
+                self.last_degraded = msg.capture_degraded;
+            }
             out.push(msg);
         }
         out
@@ -219,6 +234,7 @@ impl SessionManager {
         self.reconnect = Some(ReconnectScheduler::default_policy());
         self.reconnect_deadline = None;
         self.reconnect_stopped = false;
+        self.last_degraded = None;
         self.establish(dev, password, sni).await
     }
 
@@ -469,6 +485,7 @@ impl SessionManager {
             sess.close(0, b"user");
         }
         self.video_rx = None;
+        self.last_degraded = None;
         // 停止重连主管 + 清退避状态（下次 `connect` 会复位这些标志）。
         self.reconnect_stopped = true;
         self.reconnect = None;
