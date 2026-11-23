@@ -39,6 +39,7 @@ const mockConfig: LanDeskConfig = {
   mdns_enabled: true, signaling_enabled: true, signaling_url: 'ws://host:8443/ws',
   relay_enabled: true, relay_url: 'turn://relay.lan:3479',
   stun_enabled: true, stun_url: 'udp://lan:3478', log_level: 'Info',
+  temp_password_enabled: true, temp_password_ttl_secs: 300,
 }
 
 const mockLogs: LogLine[] = [
@@ -107,7 +108,12 @@ async function loadConfig(): Promise<void> {
   configError.value = ''
   try {
     const c = await landesk.configLoadOrInit()
-    if (c) Object.assign(config, c)
+    if (c) {
+      Object.assign(config, c)
+      // 旧后端可能没带这两个字段 → 回填默认，保证保存时一定写出完整配置。
+      if (config.temp_password_enabled === undefined) config.temp_password_enabled = true
+      if (config.temp_password_ttl_secs === undefined) config.temp_password_ttl_secs = 300
+    }
   } catch {
     configError.value = '配置读取失败，当前显示默认值（可能无法反映真实运行参数）'
     Object.assign(config, mockConfig)

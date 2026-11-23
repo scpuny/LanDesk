@@ -322,6 +322,7 @@ version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1828,9 +1829,11 @@ dependencies = [
 name = "input"
 version = "0.2.0"
 dependencies = [
+ "libc",
  "lp",
  "thiserror 1.0.69",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2079,6 +2082,7 @@ name = "landesk-ui"
 version = "0.2.0"
 dependencies = [
  "ice",
+ "input",
  "landesk-core",
  "libc",
  "lp",
@@ -2089,6 +2093,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -162,6 +162,10 @@ export interface LanDeskConfig {
   stun_enabled?: boolean
   stun_url: string | null
   log_level: 'Info' | 'Debug' | 'Warn' | 'Error'
+  /** 临时密码通道开关（默认开；开则装了且开着的机器随时可被临时码连接，无需设访问密码）。 */
+  temp_password_enabled?: boolean
+  /** 临时密码自动过期时长（秒，默认 300；最小 30）。 */
+  temp_password_ttl_secs?: number
 }
 
 /** 本机信息 */
