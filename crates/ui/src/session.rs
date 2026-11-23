@@ -207,6 +207,17 @@ pub struct SessionStatusView {
     pub bitrate_mbps: Option<f32>,
     /// 累计编码器重置次数（FR-04.6）。
     pub reset: u32,
+    // ---------- 重连进度（FR-05.4；仅 `reconnecting` 态填充，其余态保持 0/空/false）----------
+    /// 当前重连尝试序号（1 起；非重连态 = 0）。
+    pub reconnect_attempt: u32,
+    /// 最多重试次数（默认 5；非重连态 = 0）。
+    pub reconnect_max: u32,
+    /// 本轮前应等待的退避秒数（1/2/4/8/16；非重连态 = 0）。
+    pub reconnect_wait_secs: u64,
+    /// 是否已耗尽（5 次全失败 → `true`，会话转 [`SessionState::NoPath`]）。
+    pub reconnect_exhausted: bool,
+    /// 重连进度展示文案（中文，喂前端浮层；非重连态为空串）。
+    pub reconnect_label: String,
 }
 
 impl SessionStatusView {
@@ -248,6 +259,20 @@ impl SessionStatusView {
 
     pub fn with_reset(mut self, reset: u32) -> Self {
         self.reset = reset;
+        self
+    }
+
+    /// 重连进度（FR-05.4）：非重连 / 非无路径态传 `None`（保持默认 `0/0/0/false/""`）；
+    /// `reconnecting` 态传 [`crate::reconnect_view::view_of`] 的视图（下次重试序号/退避/文案），
+    /// `nopath`（已耗尽）态传 [`crate::reconnect_view::exhausted_view`]（`exhausted=true`）。
+    pub fn with_reconnect(mut self, view: Option<crate::reconnect_view::ReconnectView>) -> Self {
+        if let Some(v) = view {
+            self.reconnect_attempt = v.attempt;
+            self.reconnect_max = v.max_attempts;
+            self.reconnect_wait_secs = v.wait_secs;
+            self.reconnect_exhausted = v.exhausted;
+            self.reconnect_label = v.label;
+        }
         self
     }
 }

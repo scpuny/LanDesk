@@ -292,19 +292,23 @@ async fn main() {
             device_table.set_local_code(device_code_from(&cfg.device_name));
         }
     }
+    // 会话管理器（P2 遗留 ①）：信任任意证书的 QUIC 客户端（LAN 内网信任域，FR-01）。
+    // `insecure_default` 自动装 quinn 内置 ring provider（宿主不必直接依赖 quinn/ring）。
+    let session = Arc::new(tokio::sync::Mutex::new(
+        SessionManager::new(
+            landesk_ui::QuicClient::insecure_default("0.0.0.0:0".parse().expect("0.0.0.0:0"))
+                .expect("quic client init"),
+        ),
+    ));
+    // 起掉线重连主管（FR-05.4）：后台每 ~1s 探测活跃会话 QUIC 连接，掉线按指数退避重拨
+    // `SessionManager` 记住的目标；用户 `close` 时主管自动停止。`#[tokio::main]` 上下文内 spawn。
+    SessionManager::start_supervisor(Arc::clone(&session));
     let ctx = Ctx {
         listener: Arc::new(Mutex::new(listener)),
         devices: Arc::new(Mutex::new(device_table)),
         store: ConfigStore::new(),
         ring,
-        // 会话管理器（P2 遗留 ①）：信任任意证书的 QUIC 客户端（LAN 内网信任域，FR-01）。
-        // `insecure_default` 自动装 quinn 内置 ring provider（宿主不必直接依赖 quinn/ring）。
-        session: Arc::new(tokio::sync::Mutex::new(
-            SessionManager::new(
-                landesk_ui::QuicClient::insecure_default("0.0.0.0:0".parse().expect("0.0.0.0:0"))
-                    .expect("quic client init"),
-            ),
-        )),
+        session,
         controlled,
         static_dir: static_dir.clone(),
     };
@@ -522,6 +526,15 @@ async fn main() {
                 let mut mgr = ctx.session.lock().await;
                 mgr.close();
                 Json(SessionResp::ok(mgr.status_view())).into_response()
+            }),
+        )
+        // 会话「立即重试」（FR-05.4，重连浮层按钮）：跳过退避等待，立即重拨记住的端点。
+        .route(
+            "/api/session/reconnect-now",
+            post(|State(ctx): State<Ctx>| async move {
+                let mut mgr = ctx.session.lock().await;
+                let status = mgr.reconnect_now().await;
+                Json(SessionResp::ok(status.unwrap_or_else(|| mgr.status_view()))).into_response()
             }),
         )
         // 视频画面推流（P2②，矩阵 §7.5「画面」）：把 `SessionManager` 视频泵

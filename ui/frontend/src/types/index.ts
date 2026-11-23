@@ -102,6 +102,17 @@ export interface SessionStatus {
   bitrateMbps: number | null
   /** 累计编码器重置次数（FR-04.6）。 */
   reset: number
+  // ---------- 重连进度（FR-05.4；仅 `reconnecting`/`nopath` 态有值，其余态 0/空/false）----------
+  /** 当前重连尝试序号（1 起；非重连态 = 0）。 */
+  reconnectAttempt: number
+  /** 最多重试次数（默认 5；非重连态 = 0）。 */
+  reconnectMax: number
+  /** 本轮前应等待的退避秒数（1/2/4/8/16；非重连态 = 0）。 */
+  reconnectWaitSecs: number
+  /** 是否已耗尽（5 次全失败 → `true`，会话转 `nopath`）。 */
+  reconnectExhausted: boolean
+  /** 重连进度展示文案（中文，喂重连浮层；非重连态为空串）。 */
+  reconnectLabel: string
 }
 
 /** 会话命令统一出参（对齐 `ui::manager::SessionResp`，双宿主同形 P1.3）。

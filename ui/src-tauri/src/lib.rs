@@ -258,6 +258,17 @@ async fn session_status(state: tauri::State<'_, state::AppState>) -> Result<land
     Ok(landesk_ui::SessionResp::ok(mgr.status_view()))
 }
 
+/// 会话「立即重试」（FR-05.4，重连浮层按钮）：跳过退避等待，立即重拨 `SessionManager` 记住的
+/// 端点 + 凭据（不经 mDNS——断网期在线表可能已消失）。成功复位回 `running`；失败推进一次退避。
+/// 出参同 `SessionResp`（带最新状态快照，前端据此刷新重连进度 / 落回 running）。恒 `Ok`。
+#[cfg(feature = "tauri")]
+#[tauri::command]
+async fn session_reconnect_now(state: tauri::State<'_, state::AppState>) -> Result<landesk_ui::SessionResp, String> {
+    let mut mgr = state.session.lock().await;
+    let status = mgr.reconnect_now().await;
+    Ok(landesk_ui::SessionResp::ok(status.unwrap_or_else(|| mgr.status_view())))
+}
+
 /// 会话关闭（P2 遗留 ①，FR-02.4）：优雅断开 QUIC + 状态机落 `Closed`。
 /// 同 Tauri 异步+`State` 约束，返回 `Result<_, String>`（恒 `Ok`）。
 #[cfg(feature = "tauri")]
@@ -583,6 +594,13 @@ pub fn run() {
             }),
         ));
 
+    // 起掉线重连主管（FR-05.4）：后台每 ~1s 探测活跃会话 QUIC 连接，掉线按指数退避
+    // 重拨 `SessionManager` 记住的目标（`close` 时主管自动停止）。须在 async runtime 内
+    // spawn（同 `tauri::async_runtime::block_on` 上下文），复用全局 tokio 运行时。
+    tauri::async_runtime::block_on(async {
+        landesk_ui::SessionManager::start_supervisor(std::sync::Arc::clone(&session));
+    });
+
     // 最小 `tracing` 订阅器：把事件捕获进 `ring`（离线安全——只依赖壳 lock 里已传的
     // `tracing`/`tracing-core`，不引 `tracing-subscriber`/新 crate，守壳离线门纯净）。
     // 终端无输出（GUI 壳日志进环形缓冲供日志页查询，不刷 stdout 污染 Tauri 窗体）。
@@ -634,6 +652,7 @@ pub fn run() {
             session_connect,
             session_send_control,
             session_status,
+            session_reconnect_now,
             session_close,
             session_video_poll,
             window_platform,
