@@ -507,14 +507,38 @@ watch(liveSession, (snap) => {
   state.sessionTarget = snap.target
     ? { name: snap.target.name, id: snap.target.id, res: snap.target.res }
     : null
+  // live 态不再保留演示默认值：未上报的指标一律用 null 表达，状态栏显示「—」，
+  // 避免 18ms/4.2Mbps 这类假数据误导（做系统而非 demo）。encoder 未上报为空串。
   state.metrics = {
-    encoder: snap.encoder || 'QSV',
-    latency: snap.latencyMs ?? state.metrics.latency,
+    encoder: snap.encoder || '',
+    latency: snap.latencyMs ?? 0,
     loss: snap.lossPct ?? 0,
-    bitrate: snap.bitrateMbps ?? state.metrics.bitrate,
+    bitrate: snap.bitrateMbps ?? 0,
     reset: snap.reset,
   }
 }, { immediate: true })
+
+/** 状态栏指标显示值：live 态未上报（0 / 空串）显示「—」；非 live 演示态用本地默认值。 */
+const displayMetrics = computed(() => {
+  const m = state.metrics
+  if (!isLive.value) {
+    return {
+      encoder: m.encoder || 'QSV',
+      latency: `${m.latency || 18}ms`,
+      loss: `${m.loss || 0}%`,
+      bitrate: `${m.bitrate || 4.2}Mbps`,
+      reset: `×${m.reset}`,
+    }
+  }
+  const dash = '—'
+  return {
+    encoder: m.encoder || dash,
+    latency: m.latency > 0 ? `${m.latency}ms` : dash,
+    loss: m.loss > 0 ? `${m.loss}%` : m.loss === 0 ? '0%' : dash,
+    bitrate: m.bitrate > 0 ? `${m.bitrate}Mbps` : dash,
+    reset: `×${m.reset}`,
+  }
+})
 
 let timer = null
 onMounted(async () => {
@@ -723,11 +747,11 @@ onBeforeUnmount(() => {
     <footer class="ld-sess-bottom">
       <span class="ld-metric"><span class="ll-dot" :class="stateInfo.dot" /> {{ stateInfo.label }}</span>
       <span class="ld-metric">{{ pathTag }}</span>
-      <span class="ld-metric"><Icon name="chip" :size="12" /> <b>{{ state.metrics.encoder }}</b> H.264</span>
-      <span class="ld-metric"><span class="ld-signal" :class="state.sessionState === 'running' ? 'dot-good' : ''"><i/><i/><i/><i/></span> <b>{{ state.metrics.latency }}ms</b></span>
-      <span class="ld-metric">丢包 <b>{{ state.metrics.loss }}%</b></span>
-      <span class="ld-metric">码率 <b>{{ state.metrics.bitrate }}Mbps</b></span>
-      <span class="ld-metric">重置 <b>×{{ state.metrics.reset }}</b></span>
+      <span class="ld-metric"><Icon name="chip" :size="12" /> <b>{{ displayMetrics.encoder }}</b> H.264</span>
+      <span class="ld-metric"><span class="ld-signal" :class="state.sessionState === 'running' ? 'dot-good' : ''"><i/><i/><i/><i/></span> <b>{{ displayMetrics.latency }}</b></span>
+      <span class="ld-metric">丢包 <b>{{ displayMetrics.loss }}</b></span>
+      <span class="ld-metric">码率 <b>{{ displayMetrics.bitrate }}</b></span>
+      <span class="ld-metric">重置 <b>{{ displayMetrics.reset }}</b></span>
       <span class="ld-sess-bottom__spacer" />
       <span class="ld-metric" title="会话时长 · 画面吞吐 · 帧率（live 实时，非 live 为 0）">{{ elapsedLabel }}　↑ {{ throughputKb }}KB/s　{{ fpsNow }}fps</span>
     </footer>
