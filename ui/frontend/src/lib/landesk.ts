@@ -227,6 +227,15 @@ export const landesk = {
       : rest<SessionResp>('/api/session/close', { method: 'POST' })
   },
 
+  /** 会话「立即重试」（FR-05.4，重连浮层按钮）：跳过退避等待，立即重拨 `SessionManager`
+   *  记住的端点 + 凭据（不经 mDNS 在线表——断网期可能已消失）。成功复位回 `running`，
+   *  失败推进一次退避（主管续接）。出 `SessionResp`（带最新快照，前端据此刷新进度）。 */
+  reconnectNow(): Promise<SessionResp> {
+    return isTauri()
+      ? tauriInvoke<SessionResp>('session_reconnect_now')
+      : rest<SessionResp>('/api/session/reconnect-now', { method: 'POST' })
+  },
+
   // ---------- 视频数据面（P2 遗留 ②，矩阵 §7.5「画面」）----------
   // 画面帧经 `VideoDgram` 分片 → QUIC datagram → 控制端 `JitterBuffer` 重组为完整 NALU，
   // 由宿主逐帧送达前端（出参 `VideoFrameMsg`，`nalu` 为 base64 裸 H.264 字节）：

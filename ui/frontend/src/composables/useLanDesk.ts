@@ -239,6 +239,20 @@ async function closeSessionLive(): Promise<void> {
   } catch { liveSession.value = null }
 }
 
+/** live 立即重试（FR-05.4，重连浮层按钮）：跳过退避等待，立即重拨记住端点。
+ *  出 `SessionResp`（成功复位回 running、失败推进退避），`liveSession` 据 `status` 刷新。 */
+async function reconnectNowLive(): Promise<{ ok: boolean; error?: string }> {
+  if (!(await ensureLive())) return { ok: false, error: 'not-live' }
+  try {
+    const resp = await landesk.reconnectNow()
+    liveSession.value = resp.status
+    if (resp.error) return { ok: false, error: resp.error }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 // ---------- 视频数据面（P2 遗留 ②，矩阵 §7.5「画面」）----------
 // 画面帧通路：受控端 capture→encode→`VideoDgram` 分片→QUIC datagram→控制端 `JitterBuffer` 重组
 // →宿主逐帧送达前端（`VideoFrameMsg`，`nalu` 为 base64 裸 H.264 字节）。宿主分流：
@@ -314,6 +328,7 @@ export interface UseLanDeskReturn {
   connectSession: (deviceId: string, password: string, sni?: string) => Promise<{ ok: boolean; error?: string }>
   sendControl: (action: ControlAction) => Promise<{ ok: boolean; sent?: number; error?: string }>
   closeSessionLive: () => Promise<void>
+  reconnectNowLive: () => Promise<{ ok: boolean; error?: string }>
   // 视频数据面（P2 遗留 ②，仅 live 生效）
   startVideoStream: (onFrame: (f: VideoFrameMsg) => void) => () => void
   stopVideoStream: () => void
@@ -328,7 +343,7 @@ export function useLanDesk(): UseLanDeskReturn {
     reconnectPlan, loadReconnectPlan,
     logs, loadLogs, clearLogs,
     refreshTempPassword,
-    liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
+    liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive, reconnectNowLive,
     startVideoStream, stopVideoStream,
   }
 }

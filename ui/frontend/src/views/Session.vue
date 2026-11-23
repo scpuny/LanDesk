@@ -23,7 +23,7 @@ const { state, navigate, toast, confirm } = useUi()
 const { isMac } = useWindowControls()
 const {
   reconnectPlan, loadReconnectPlan,
-  isLive, liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive,
+  isLive, liveSession, loadSessionStatus, connectSession, sendControl, closeSessionLive, reconnectNowLive,
   startVideoStream, stopVideoStream,
 } = useLanDesk()
 
@@ -47,14 +47,24 @@ const states: Record<SessionState, { label: string; dot: string }> = {
 }
 const stateInfo = computed(() => states[state.sessionState] || states.idle)
 const targetName = computed(() => state.sessionTarget?.name || state.sessionTarget?.id || '远程设备')
-// 顶部状态标签：重连态动态拼接「重连中 N/max」（N 为演示计数，max 来自退避计划）。
+// 顶部状态标签：重连态动态拼接「重连中 N/max」（N/max 优先后端真实退避进度，非 live 回退演示计数）。
 const stateLabel = computed(() => stateInfo.value.label +
-  (state.sessionState === 'reconnecting' ? ` ${Math.min(retryAttempt.value, maxAttempts.value)}/${maxAttempts.value}` : ''))
+  (state.sessionState === 'reconnecting' ? ` ${Math.min(reconnectAttempt.value, maxAttempts.value)}/${maxAttempts.value}` : ''))
 
 const scaleMode = ref('自适应')
 const retryAttempt = ref(2)
 const password = ref('')
-const autoHideHint = ref(true)
+// #88：OpenH264 降级 banner 改**事件驱动**（`encoder=OpenH264` 且 `reset>0` 才显示，非写死 true）。
+const degradedBannerDismissed = ref(false)
+const showDegradedBanner = computed(() =>
+  state.metrics.encoder === 'OpenH264' && state.metrics.reset > 0 && !degradedBannerDismissed.value)
+function dismissDegradedBanner(): void { degradedBannerDismissed.value = true }
+
+// #87：重连进度优先取后端 `liveSession` 真实退避（`reconnectAttempt/Max/WaitSecs/Label`），
+// 非 live 演示态回退本地 `retryAttempt`/`reconnectPlan` 计数（保留预览体验）。
+const reconnectAttempt = computed(() => liveSession.value?.reconnectAttempt || Math.min(retryAttempt.value, maxAttempts.value))
+const reconnectWait = computed(() => liveSession.value?.reconnectWaitSecs ?? nextWait.value)
+const reconnectLabel = computed(() => liveSession.value?.reconnectLabel || '')
 
 const pathTagMap: Record<ConnMode, string> = { inner: '内网直连', p2p: 'P2P 直连', relay: '中继转发' }
 const pathClassMap: Record<ConnMode, string> = { inner: 'll-tag--brand', p2p: 'll-tag--success', relay: 'll-tag--warning' }
@@ -138,11 +148,14 @@ async function verify() {
   setState('running'); toast('鉴权成功，会话已建立')
 }
 async function retryNow() {
-  // live：重新拨号当前目标（退避后手动重试）；非 live 演示态。
+  // live：立即重拨记住端点（跳过退避等待、不经 mDNS——断网期在线表可能已消失）。
+  // 结果由后端快照决定：成功落 `running`、失败仍 `reconnecting`/`nopath`（推进一次退避，主管续接）。
+  // `state.sessionState` 由 `watch(liveSession)` 自动同步，此处只给提示。
   if (isLive.value && state.sessionTarget) {
-    const r = await connectSession(state.sessionTarget.id, password.value || '')
-    if (r.ok) { setState('running'); toast('已手动重试并连接成功') }
-    else { setState('reconnecting'); toast(r.error || '重连失败，继续退避', 'warning') }
+    await reconnectNowLive()
+    const code = liveSession.value?.stateCode
+    if (code === 'running') toast('已手动重试并连接成功')
+    else toast('重连未成功，继续退避', 'warning')
     return
   }
   setState('running'); toast('已手动重试并连接成功')
@@ -554,14 +567,18 @@ onBeforeUnmount(() => {
 
     <!-- 画面区 -->
     <div class="ld-sess-canvas">
-      <!-- 运行态：铺满画面 + 悬浮工具栏 + 降级提示 -->
-      <template v-if="state.sessionState === 'running'">
+      <!-- 运行态 / 重连中：铺满画面 + 悬浮工具栏 + 降级提示。
+           ★ #87「保留最后一帧」：重连中 canvas 持续挂载（不切走），画面区停在最后一帧，
+           重连浮层半透明叠在其上——WebCodecs 解码器在重连期停喂新帧（`onVideoFrame` 仅 running 处理），
+           canvas 保留末帧；重连成功后后端强制 IDR 起帧，画面自动恢复。 -->
+      <template v-if="state.sessionState === 'running' || state.sessionState === 'reconnecting'">
         <div class="ld-sess-canvas__bg" style="background:radial-gradient(ellipse at 60% 40%, #3a5a7a 0%, #1d3040 45%, #0a1018 100%)" />
         <!-- P2② 视频数据面：live 且运行态时 WebCodecs 解码画面渲染到此 canvas（复用 __bg 定位，铺满）；
              非 live（演示预览）不渲染，保留渐变底。canvas 内禀 1280×720，CSS object-fit 由「画质」切换（contain↔none）。
-             live 运行态：画面区捕获键鼠/滚轮/键盘（#72）逐事件转发后端 session_send_control。 -->
+             live 运行态：画面区捕获键鼠/滚轮/键盘（#72）逐事件转发后端 session_send_control（`inputEnabled` 仅 running）。
+             重连中 canvas 仍挂载（保留末帧），但输入 handler 因 `inputEnabled()=false` 全部 no-op。 -->
         <canvas
-          v-if="isLive && liveSession?.stateCode === 'running'"
+          v-if="isLive && (liveSession?.stateCode === 'running' || liveSession?.stateCode === 'reconnecting')"
           ref="canvasEl"
           class="ld-sess-canvas__bg"
           width="1280"
@@ -576,21 +593,47 @@ onBeforeUnmount(() => {
           @keyup="onKeyUp"
           @blur="onKeyBlur"
         />
-        <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · 自适应画质 · 60fps</div>
-        <div style="position:absolute;top:14px;right:16px;font-size:12px;color:#e8edf5;opacity:.8;display:flex;align-items:center;gap:6px"><Icon name="shield" :size="13" /> QUIC + AES-256-GCM 加密通话</div>
-        <div class="ld-sess-warnbar" v-if="autoHideHint">
-          <Icon name="alertTriangle" :size="14" /> 硬件编码不可用，已切换 OpenH264，会话保持不中断 · 重置 ×1
-          <button @click="autoHideHint = false"><Icon name="close" :size="13" /></button>
+        <!-- 运行态专属 chrome：悬浮工具栏 / 顶部标签 / 降级 banner / 底部提示（重连中隐藏，让位给重连浮层）。 -->
+        <template v-if="state.sessionState === 'running'">
+          <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · 自适应画质 · 60fps</div>
+          <div style="position:absolute;top:14px;right:16px;font-size:12px;color:#e8edf5;opacity:.8;display:flex;align-items:center;gap:6px"><Icon name="shield" :size="13" /> QUIC + AES-256-GCM 加密通话</div>
+          <div class="ld-sess-warnbar" v-if="showDegradedBanner">
+            <Icon name="alertTriangle" :size="14" /> 硬件编码不可用，已切换 OpenH264，会话保持不中断 · 重置 ×{{ state.metrics.reset }}
+            <button @click="dismissDegradedBanner"><Icon name="close" :size="13" /></button>
+          </div>
+          <div class="ld-sess-toolrail">
+            <button title="剪贴板同步" @click="onToolClipboard"><Icon name="clipboard" :size="17" /></button>
+            <button title="键鼠（画面区已接管输入）" @click="onToolKeyboard"><Icon name="keyboard" :size="17" /></button>
+            <button title="截图（抓当前画面帧）" @click="onToolScreenshot"><Icon name="camera" :size="17" /></button>
+            <button title="显示器切换" @click="onToolDisplay"><Icon name="monitor" :size="17" /></button>
+            <button title="全屏" @click="onToolFullscreen"><Icon name="fullscreen" :size="17" /></button>
+            <button class="is-danger" title="断开" @click="disconnect"><Icon name="power" :size="17" /></button>
+          </div>
+          <div style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:11px;color:#e8edf5;opacity:.5">鼠标移上 3 秒自动隐藏工具栏</div>
+        </template>
+
+        <!-- #87 重连中浮层：半透明叠在持久 canvas 上（保留最后一帧），含进度条 + 立即重试 / 断开。
+             进度优先后端真实退避（reconnectAttempt/WaitSecs/Label），非 live 回退 reconnectPlan 演示序列。 -->
+        <div v-if="state.sessionState === 'reconnecting'" class="ld-sess-overlay ld-sess-overlay--reconnect">
+          <div class="ld-sess-reconnect-card">
+            <div class="ld-sess-spinner" />
+            <div class="ld-sess-title" style="font-size:18px">
+              重连中 ({{ reconnectAttempt }}/{{ maxAttempts }}){{ reconnectLabel ? ` · ${reconnectLabel}` : ` · 正在尝试 ${pathTag} 直连` }}
+            </div>
+            <div class="ld-sess-desc">QUIC 连接已中断，采用指数退避重连（{{ waitLabel }}）</div>
+            <div class="ld-sess-progress">
+              <i :style="{ width: `${Math.min(100, (reconnectAttempt / maxAttempts) * 100)}%` }" />
+            </div>
+            <div class="ld-sess-reconnect-meta">
+              <span>第 {{ reconnectAttempt }} 次重试 · 下次重试 {{ reconnectWait }} 秒后</span>
+              <span class="ld-mono">{{ reconnectAttempt }}/{{ maxAttempts }}</span>
+            </div>
+            <div class="ld-sess-actions">
+              <button class="ll-btn ll-btn--primary" @click="retryNow"><Icon name="refresh" :size="14" /> 立即重试</button>
+              <button class="ll-btn ll-btn--default" @click="disconnect"><Icon name="power" :size="14" /> 断开连接</button>
+            </div>
+          </div>
         </div>
-        <div class="ld-sess-toolrail">
-          <button title="剪贴板同步" @click="onToolClipboard"><Icon name="clipboard" :size="17" /></button>
-          <button title="键鼠（画面区已接管输入）" @click="onToolKeyboard"><Icon name="keyboard" :size="17" /></button>
-          <button title="截图（抓当前画面帧）" @click="onToolScreenshot"><Icon name="camera" :size="17" /></button>
-          <button title="显示器切换" @click="onToolDisplay"><Icon name="monitor" :size="17" /></button>
-          <button title="全屏" @click="onToolFullscreen"><Icon name="fullscreen" :size="17" /></button>
-          <button class="is-danger" title="断开" @click="disconnect"><Icon name="power" :size="17" /></button>
-        </div>
-        <div style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-size:11px;color:#e8edf5;opacity:.5">鼠标移上 3 秒自动隐藏工具栏</div>
       </template>
 
       <!-- 鉴权中（已输密码、后端正在建连） -->
@@ -623,22 +666,6 @@ onBeforeUnmount(() => {
             <button class="ll-btn ll-btn--default" @click="cancel"><Icon name="close" :size="14" /> 取消</button>
           </div>
         </div>
-      </div>
-
-      <!-- 重连中 -->
-      <div v-else-if="state.sessionState === 'reconnecting'" class="ld-sess-overlay">
-        <div class="ld-sess-bigicon is-warn"><Icon name="refresh" :size="30" /></div>
-        <div class="ld-sess-title" style="font-size:18px">重连中 ({{ Math.min(retryAttempt, maxAttempts) }}/{{ maxAttempts }})…正在尝试 P2P 直连</div>
-        <div class="ld-sess-desc">QUIC 连接已中断，采用指数退避重连（{{ waitLabel }}）</div>
-        <div class="ld-sess-progress"><i :style="{ width: (Math.min(retryAttempt, maxAttempts) / maxAttempts * 100) + '%' }" /></div>
-        <div style="display:flex;gap:40px;font-size:12px;color:var(--ll-session-text-dim)">
-          <span>第 {{ retryAttempt }} 次尝试 · 下次重试 {{ nextWait }} 秒后</span><span>{{ Math.min(retryAttempt, maxAttempts) }} / {{ maxAttempts }}</span>
-        </div>
-        <div class="ld-sess-actions">
-          <button class="ll-btn ll-btn--primary" @click="retryNow"><Icon name="refresh" :size="14" /> 立即重试</button>
-          <button class="ll-btn ll-btn--default" @click="disconnect"><Icon name="power" :size="14" /> 断开连接</button>
-        </div>
-        <div style="font-size:11px;color:var(--ll-session-text-dim);opacity:.7;margin-top:8px">画面保留最后一帧 · 重连成功后强制 IDR 刷新</div>
       </div>
 
       <!-- 鉴权失败 -->

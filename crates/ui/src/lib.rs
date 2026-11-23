@@ -35,7 +35,7 @@ pub use local_info::{
 pub use logs::{LevelFilter, LogLine, LogRing, DEFAULT_LOG_CAPACITY};
 pub use manager::{SendControlError, SessionManager, SessionResp};
 pub use plan::{decide_path, PathDecision, PathDecisionView};
-pub use reconnect_view::{ReconnectSchedule, ReconnectView, schedule_of, view_of};
+pub use reconnect_view::{ReconnectSchedule, ReconnectView, exhausted_view, schedule_of, view_of};
 pub use session::{
     conn_mode_code, expand, clip_sha256, clip_text_to_msgs, session_state_code,
     ControlAction, ExpandError, MOD_ALT, MOD_CTRL, MOD_META, MOD_SHIFT,

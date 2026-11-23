@@ -126,6 +126,13 @@ impl QuicConnection {
         }
     }
 
+    /// 非阻塞探测本连接是否已关闭（quinn [`quinn::Connection::close_reason`] 非 `None` 即已关）。
+    ///
+    /// 供上层（会话重连编排）判断「会话是否掉线」——不阻塞、不占控制流锁，可随时轮询。
+    pub fn is_closed(&self) -> bool {
+        self.conn.close_reason().is_some()
+    }
+
     /// 关闭本连接（正常会话结束）。
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.conn.close(code.into(), reason);
