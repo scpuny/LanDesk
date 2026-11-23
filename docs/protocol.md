@@ -163,7 +163,9 @@ pub struct Reconnect { pub reason: u8 }    // 1=断线重连 2=编码器全量�
 
 ### 2.1 设计约束
 
-- 单 Datagram ≤ **1232B**（1200B MTU - UDP/IP/QUIC 开销 32B）。
+- 单 Datagram ≤ **1148B**（quinn 0.11 默认 `INITIAL_MTU=1200`；每包可发上限 =
+  `current_mtu − 1rtt_overhead(≈22) − Datagram::SIZE_BOUND(9)` ≈ 1169，取 1148 留裕量，
+  保证任何时刻单包都发得出、`send_datagram` 不报 `TooLarge`。MTU 探测收敛到 1450 时上限升至 ~1419）。
 - H.264 裸 NALU 流，不用容器（FR-04.3）；SPS/PPS 在 I 帧前冗余发送，且每 5s 或重连后强制重发。
 - 丢包策略：视频 Datagram 允许丢；**I 帧分片丢失 → 该 GOP 整段标记不可解，请求强制 I 帧**（控制流发 `EncodeParams{keyframe_now=1}` 语义复用 `bitrate_kbps=0xFFFF` 触发）。
 
@@ -306,7 +308,7 @@ pub struct VideoDgram { pub magic: u16, pub ver: u8, pub seq: u16,
                         pub kind: u8, pub frag: u8, pub flags: u8,
                         pub nalu: Cow<'a, [u8]> }
 impl VideoDgram {
-    pub const MAX: usize = 1232;           // 单包上限
+    pub const MAX: usize = 1148;          // 单包上限（≤ quinn 默认可发 datagram 上限，见 §2.1）
     pub fn split(self, nalu: &[u8]) -> impl Iterator<Item = Vec<u8>>; // 分片
     pub fn needs_keyframe_request(&self) -> bool;
 }

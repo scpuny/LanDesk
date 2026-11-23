@@ -313,6 +313,11 @@ async fn serve_session(mut session: OneClickSession, device_code: String) {
             }
         };
         let interval = pump.interval();
+        // 连续发送失败容忍度：`send_video` 把「连接已死 / 对端未开 datagram / 瞬时限长」
+        // 都归一为 `VideoDropped`。超限才停发流，避免一次瞬时抖动（MTU 未收敛窗口、
+        // 路径 MTU 短暂低于分片长）就把整条画面流永久打黑。
+        const MAX_CONSECUTIVE_SEND_FAILS: u32 = 30;
+        let mut send_fails: u32 = 0;
         loop {
             let vf = match pump.next_frame() {
                 Ok(v) => v,
@@ -322,10 +327,20 @@ async fn serve_session(mut session: OneClickSession, device_code: String) {
                 }
             };
             match pump.send_tx(&tx, &vf) {
-                Ok(n) => debug!(fragments = n, "受控端发出视频分片"),
+                Ok(n) => {
+                    if send_fails > 0 {
+                        debug!(recovered_after = send_fails, "受控端视频发送恢复");
+                    }
+                    send_fails = 0;
+                    debug!(fragments = n, "受控端发出视频分片");
+                }
                 Err(e) => {
-                    warn!(error = %e, "受控端 send_video 失败，停发流（对端关闭）");
-                    return;
+                    send_fails += 1;
+                    warn!(error = %e, consecutive = send_fails, "受控端 send_video 失败");
+                    if send_fails >= MAX_CONSECUTIVE_SEND_FAILS {
+                        warn!(consecutive = send_fails, "受控端连续发流失败超限，停发流（连接失效 / 对端关闭）");
+                        return;
+                    }
                 }
             }
             if let Some(d) = interval {
