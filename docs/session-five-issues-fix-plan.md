@@ -172,6 +172,11 @@
 
 按用户偏好：每批**本地提交**，不推送、不建 PR、不发版，等用户明确指令再走 Git Flow。
 
+> **实施结果（2026-11-23，分支 `fix/session-five-issues`，6 提交）**：
+> - B3 层 2 实际未采用「新增 ControlMsg 变体」，改为**视频 datagram flags 带内上报**（`FLAG_CAPTURE_DEGRADED`/`FLAG_DEGRADED_REASON`）。原因：控制端 `SessionManager` 无 `recv_control` 循环，且 `send_control`/`recv_control` 均需 `&mut session`——新增接收循环会长期持锁阻塞其他命令，需重构会话拆半，风险高于收益。带内方案与画面天然同步、控制端视频泵任务独立不争锁、零协议兼容成本。
+> - B4 未做自连探测（macOS 无公开 API 读应用防火墙状态，且本机自连成功无法证明外部可入站），改为设置页 + 连接失败页的**引导文案**。
+> - 验证：全量 `cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`、前端 `typecheck` + `vite build` 全通过。
+
 ## 7. 待用户确认的决策点
 
 1. **降级提示方式**（问题 2/5）：是否接受「新增控制通道 `CaptureDegraded` 事件 + banner」（B3），还是先只做本地提示（受控端弹窗/日志）以缩小改动？
