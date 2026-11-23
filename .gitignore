@@ -39,3 +39,6 @@ thirdparty/
 /package-lock.json
 # 根目录散放的设计参考图（reconnecting.png / authfail.png / establishing.png 等）
 /*.png
+
+# E2E 冒烟运行产物（报告含本机 IP/环境，不入库）
+scripts/test-e2e/reports/
