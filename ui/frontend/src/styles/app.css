@@ -560,3 +560,15 @@
   animation: ll-shimmer 1.4s ease-in-out infinite;
 }
 @keyframes ll-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ---------------- 运行自检（设置页） ---------------- */
+.ld-selfcheck { display: flex; flex-direction: column; gap: 2px; }
+.ld-selfcheck__row { display: flex; align-items: center; gap: var(--ll-space-2); padding: 7px 0; border-bottom: 1px solid var(--ll-color-border); font-size: var(--ll-fs-sm); }
+.ld-selfcheck__dot { flex: none; }
+.ld-selfcheck__label { color: var(--ll-color-text-primary); font-weight: var(--ll-fw-medium); flex: none; min-width: 130px; }
+.ld-selfcheck__label--peer { font-weight: 400; color: var(--ll-color-text-secondary); flex: 1 1 auto; min-width: 0; }
+.ld-selfcheck__detail { color: var(--ll-color-text-tertiary); flex: 1 1 auto; min-width: 0; }
+.ld-selfcheck__tag { flex: none; font-size: var(--ll-fs-xs); color: var(--ll-color-success); border: 1px solid var(--ll-color-success); border-radius: var(--ll-radius-xs); padding: 1px 6px; }
+.ld-selfcheck__tag--manual { color: var(--ll-color-text-tertiary); border-color: var(--ll-color-border); }
+.ld-selfcheck__group { margin-top: 10px; padding: 6px 0; font-size: var(--ll-fs-xs); color: var(--ll-color-text-tertiary); }
+.ld-selfcheck__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--ll-space-3); margin-top: 12px; font-size: var(--ll-fs-xs); color: var(--ll-color-text-tertiary); }

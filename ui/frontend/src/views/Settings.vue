@@ -1,12 +1,16 @@
 <script setup lang="ts">
 // 设置页：横向表单（label 左对齐固定宽 140px + 两列网格 + 长文本跨双列），对齐 V2 设计稿。
 import { ref, computed, onMounted } from 'vue'
-import { toast, confirm } from '../composables/useUi'
+import { toast, confirm, useUi } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
 import type { Preset, LanDeskConfig } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
-const { config, configLoading, configError, loadConfig, saveConfig } = useLanDesk()
+const { navigate } = useUi()
+const {
+  config, configLoading, configError, loadConfig, saveConfig,
+  controlled, local, loadControlledStatus, loadLocal,
+} = useLanDesk()
 const dirty = ref(false)
 const saving = ref(false)
 const showPassword = ref(false)
@@ -45,7 +49,22 @@ async function reset() {
   if (ok) { await loadConfig(); dirty.value = false; toast('已恢复上次保存的配置', 'info') }
 }
 
-onMounted(loadConfig)
+// 运行自检：只列本机可真实查询的项（受控服务/mDNS/编码能力/版本）。
+// 屏幕录制权限、对端锁屏、防火墙入站属对端运行态，本机无法可靠探测，
+// 明确列为"需在对端确认"，不造假绿灯——避免 demo 式误导。
+const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'unknown'
+const selfChecks = computed(() => [
+  { label: '受控服务监听', ok: controlled.serving, detail: controlled.serving ? `UDP ${controlled.port} 已监听` : '未开启（密码与临时码通道都关）', auto: true },
+  { label: 'mDNS 局域网发现', ok: local.mdns, detail: local.mdns ? '已启用' : '未启用', auto: true },
+  { label: '编码能力', ok: local.enc.length > 0, detail: local.enc.length ? local.enc.join(' · ') : '未探测', auto: true },
+])
+const peerChecks = [
+  '被控端已授予屏幕录制权限（macOS：系统设置 → 隐私与安全性 → 屏幕录制）',
+  '被控端处于已登录的交互桌面（非锁屏 / 非 RDP 断开）',
+  '被控端防火墙已放行 LanDesk 的 UDP 52000 入站连接',
+]
+
+onMounted(() => { loadConfig(); loadControlledStatus(); loadLocal() })
 </script>
 
 <template>
@@ -173,6 +192,32 @@ onMounted(loadConfig)
             </div>
             <input v-model="config.stun_url" class="ll-input" placeholder="udp://host:3478" @input="markDirty" />
             <span class="ld-form-help">用于探测 NAT 类型与公网映射</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行自检 -->
+      <section class="ld-card ld-card__pad">
+        <div class="ld-card__head">
+          <Icon name="check" :size="18" style="color:var(--ll-color-brand)" />
+          <div><div class="ld-card__title">运行自检</div><div class="ld-card__sub">本机可测项自动检测 · 对端项待确认 · 版本 {{ appVersion }}</div></div>
+        </div>
+        <div class="ld-selfcheck">
+          <div v-for="c in selfChecks" :key="c.label" class="ld-selfcheck__row">
+            <span class="ld-selfcheck__dot ll-dot" :class="c.ok ? 'll-dot--success' : 'll-dot--warning'" />
+            <span class="ld-selfcheck__label">{{ c.label }}</span>
+            <span class="ld-selfcheck__detail">{{ c.detail }}</span>
+            <span class="ld-selfcheck__tag">自动</span>
+          </div>
+          <div class="ld-selfcheck__group">对端待确认（本机无法探测，连接异常时逐项核对）</div>
+          <div v-for="(p, i) in peerChecks" :key="i" class="ld-selfcheck__row">
+            <span class="ld-selfcheck__dot ll-dot ll-dot--warning" />
+            <span class="ld-selfcheck__label ld-selfcheck__label--peer">{{ p }}</span>
+            <span class="ld-selfcheck__tag ld-selfcheck__tag--manual">对端</span>
+          </div>
+          <div class="ld-selfcheck__foot">
+            <span>连接异常？到日志中心导出诊断包（含环境快照与全部日志），附给技术支持定位。</span>
+            <button class="ll-btn ll-btn--default" @click="navigate('logs')"><Icon name="file" :size="14" /> 日志中心</button>
           </div>
         </div>
       </section>
