@@ -8,7 +8,7 @@
 //!   校验像素往返无损、烧录帧号自洽。
 //!
 //! 证明数据面通路（FR-03 采集 / FR-04 编码 → FR-05 QUIC）在真实 QUIC 上端到端跑通，非 mock。
-//! 分辨率取 16×16：帧 1024B，NALU=4B 起始码+1024B=1028B < `lp::DGRAM_MAX`(1232)，保证可单 Datagram 发送。
+//! 分辨率取 16×16：帧 1024B，NALU=4B 起始码+1024B=1028B < `lp::DGRAM_MAX`(1148)，保证可单 Datagram 发送。
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
