@@ -74,6 +74,12 @@ function leave(view: 'devices' | 'settings' | 'logs') {
 }
 function closeSession() { setState('closed'); goBack() }
 function cancel() { setState('idle'); goBack(); toast('已取消连接', 'info') }
+// 待鉴权/已关闭卡片的次要按钮：idle（首次待连接）→ 取消回设备列表；
+// closed（会话已断开但记得目标）→ 保留会话窗，仅切回设备列表选别的设备（不关窗、不清目标）。
+function secondaryAction() {
+  if (state.sessionState === 'closed') { leave('devices'); return }
+  cancel()
+}
 async function disconnect() {
   const ok = await confirm({ title: '断开连接', message: '确定要断开当前远程会话吗？', confirmText: '断开', cancelText: '保持连接' })
   if (!ok) return
@@ -606,10 +612,12 @@ onBeforeUnmount(() => {
         <button class="ll-btn ll-btn--default" @click="cancel"><Icon name="close" :size="14" /> 取消连接</button>
       </div>
 
-      <!-- 待鉴权：拿到目标后先输入对方访问密码或临时密码（对齐「点设备→输密码→看桌面」闭环） -->
-      <div v-else-if="state.sessionState === 'idle' && state.sessionTarget" class="ld-sess-overlay">
-        <div class="ld-sess-bigicon"><Icon name="key" :size="30" /></div>
-        <div class="ld-sess-title" style="font-size:18px">连接 {{ targetName }}</div>
+      <!-- 待鉴权 / 已关闭：拿到目标后先输入对方访问密码或临时密码（对齐「点设备→输密码→看桌面」闭环）。
+           `closed` 且仍记得目标（顶部 yangbo-PC）时走这里「重新连接」，不必回设备列表；
+           密码/临时码会轮换，故重连仍走输密码卡（临时码默认开，可不设访问密码）。 -->
+      <div v-else-if="(state.sessionState === 'idle' || state.sessionState === 'closed') && state.sessionTarget" class="ld-sess-overlay">
+        <div class="ld-sess-bigicon"><Icon :name="state.sessionState === 'closed' ? 'refresh' : 'key'" :size="30" /></div>
+        <div class="ld-sess-title" style="font-size:18px">{{ state.sessionState === 'closed' ? `重新连接 ${targetName}` : `连接 ${targetName}` }}</div>
         <div class="ld-sess-desc">请输入对方设备的访问密码，或对方屏幕上的临时密码（二者任一即可连入；对方临时码默认开启，无需设访问密码也可连）</div>
         <div class="ld-sess-password-card">
           <div style="display:flex;align-items:center;gap:8px">
@@ -619,8 +627,8 @@ onBeforeUnmount(() => {
           <input v-model="password" type="password" class="ll-input" placeholder="访问密码，或 6 位临时密码"
                  @keyup.enter="connectFromTarget" />
           <div class="ld-sess-actions">
-            <button class="ll-btn ll-btn--primary" @click="connectFromTarget"><Icon name="link" :size="14" /> 建立连接</button>
-            <button class="ll-btn ll-btn--default" @click="cancel"><Icon name="close" :size="14" /> 取消</button>
+            <button class="ll-btn ll-btn--primary" @click="connectFromTarget"><Icon name="link" :size="14" /> {{ state.sessionState === 'closed' ? '重新连接' : '建立连接' }}</button>
+            <button class="ll-btn ll-btn--default" @click="secondaryAction"><Icon name="close" :size="14" /> {{ state.sessionState === 'closed' ? '换设备' : '取消' }}</button>
           </div>
         </div>
       </div>
