@@ -11,6 +11,57 @@
 - **自动重连**：掉线检测 + 指数退避重连（1/2/4/8/16s，最多 5 次），末帧保留
 - **多形态交付**：Tauri GUI / 独立 CLI 二进制 / 浏览器 UI 服务（`ui-server`）
 
+## 连接流程
+
+三段式路径（内网 → P2P → 中继）+ E2E 密钥协商 + 双通道数据面，对应 `docs/protocol.md`：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as 控制端 (GUI/CLI)
+    participant S as 受控端 (QUIC:52000)
+    participant SIG as 信令服务 /ws
+    participant RELAY as QUIC 中继 :9000
+
+    Note over C,S: ① 发现（内网）
+    C->>S: mDNS _landesk._tcp（PTR + A/AAAA）
+    S-->>C: TXT{id,name,enc,res,relay} → 端点 ip:52000
+
+    alt 内网可达（UDP 52000 通）
+        Note over C,S: ② 直连路径
+        C->>S: QUIC 拨号（内网直连）
+    else 外网（NAT 后）
+        Note over C,SIG: ② P2P 打洞路径
+        C->>SIG: reg / req（上线 + 找对端）
+        SIG-->>C: peer + ICE 候选
+        C->>SIG: ice 候选交换（经内嵌 STUN 反射 srflx）
+        C-->>S: UDP 打洞（srflx 候选互指）
+        alt 打洞失败
+            C->>SIG: 超时 → relay 撮合
+            SIG-->>C: relay.endpoint + ticket
+            C->>RELAY: 出示 ticket 建 QUIC 入向
+            S->>RELAY: 出示 ticket 建 QUIC 入向
+            RELAY-->>C: 字节透传（不解密）
+        end
+    end
+
+    Note over C,S: ③ 密钥协商（E2E，整段复用 enc_key）
+    C->>S: X25519 client_pub + nonce
+    S-->>C: X25519 server_pub + nonce
+    Note over C,S: HKDF-SHA256(shared, salt=client‖server, info=landesk-v1)<br/>enc_key = SHA256(master‖"enc")
+    C->>S: 访问密码 / 临时码校验（不传明文）
+    S-->>C: AUTH_RESULT{code}
+
+    Note over C,S: ④ 数据面（双通道，nonce=prefix‖seq 防重放）
+    C->>S: 控制流（Stream A，可靠）：键鼠 / 剪贴板 / 截图 / 显示器
+    S-->>C: 视频流（Stream B Datagram，不可靠）：H.264 NALU 分片<br/>SPS/PPS 随 I 帧冗余，每 5s 或重连后重发
+
+    Note over C,S: ⑤ 故障兜底
+    S-->>C: 编码器异常 → ENCODE_EVENT{code}，本地 close+reopen<br/>全失败降级 OpenH264（不断会话）
+    C->>S: QUIC 断连 → 指数退避 1/2/4/8/16s 重连（最多 5 次，末帧保留）
+    S-->>C: 打洞失败且无中继 → SESSION_CLOSE{reason=4}「无可用路径」
+```
+
 ## 架构
 
 Cargo Workspace 多 crate，按依赖方向单向分层：
@@ -121,6 +172,40 @@ CARGO_NET_OFFLINE=true cargo build --features tauri
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo run -p controlled --offline   # 默认监听 0.0.0.0:52000
 ```
+
+### 可选服务组件（外网 / P2P 场景）
+
+内网直连不需要任何额外服务；外网 P2P 打洞与中继兜底才启用下面两个独立二进制。
+
+**`signaling-server`** — 轻信令服务（`crates/signaling-server`，axum + WebSocket，内存在线表，零画面流量）。撮合 `reg/req/peer/ice/relay` 五类消息，可内嵌 STUN 反射器（避免依赖第三方 STUN）。
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo run -p signaling-server --offline
+# 默认监听 127.0.0.1:8443（/ws + /health）
+# 可选内嵌 STUN 反射器：
+cargo run -p signaling-server --offline -- --bind 0.0.0.0:8443 --stun 0.0.0.0:4433
+```
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--bind` | `127.0.0.1:8443` | HTTP/WS 监听地址 |
+| `--stun` | 关 | 内嵌 STUN 反射器 UDP 地址（`-stun`，RFC 5389，仅 `CHANNEL`） |
+
+**`relay-server`** — QUIC 字节透传中继（`apps/relay-server`，P2P 打洞失败后的兜底）。按 `ticket` 撮合两端后盲搬控制流 + 视频 Datagram，**不解密、不存会话状态**（会话密钥 E2E，中继不可见画面）。
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo run -p relay-server --offline
+# 默认监听 0.0.0.0:9000
+cargo run -p relay-server --offline -- --bind 0.0.0.0:9000
+```
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--bind` | `0.0.0.0:9000` | QUIC 入向监听地址 |
+
+> 数据面走 QUIC 中继（非 TURN）：`relay.ticket` 含中继会话密钥派生材料，两端出示后被验证并直接透传。
 
 ## 测试
 
