@@ -176,7 +176,7 @@ mod tests {
     fn fragment_single_packet_for_small_nalu() {
         let nalu: Vec<u8> = (0..100).collect();
         let frags = VideoDgram::fragment_nalu(&nalu, 7, NaluKind::PFrame as u8, 0);
-        assert_eq!(frags.len(), 1, "100B < 1222B 走单包");
+        assert_eq!(frags.len(), 1, "100B < FRAG_PAYLOAD_MAX 走单包");
         assert_eq!(frags[0].frag, VideoDgram::FRAG_LAST_BIT, "单包即末片（分片号 0）");
         assert!(frags[0].is_last(), "单包末片位置起");
         assert_eq!(frags[0].seq, 7);
@@ -205,11 +205,45 @@ mod tests {
 
     #[test]
     fn fragment_edge_exact_capacity() {
-        // 恰好 1222B（= FRAG_PAYLOAD_MAX）→ 单片。
+        // 恰好 FRAG_PAYLOAD_MAX（= DGRAM_MAX−10）→ 单片。
         let nalu = vec![0u8; VideoDgram::FRAG_PAYLOAD_MAX];
         assert_eq!(VideoDgram::fragment_nalu(&nalu, 1, 2, 0).len(), 1);
-        // 1223B → 2 片。
+        // +1B → 2 片。
         let nalu = vec![0u8; VideoDgram::FRAG_PAYLOAD_MAX + 1];
         assert_eq!(VideoDgram::fragment_nalu(&nalu, 1, 2, 0).len(), 2);
+    }
+
+    /// 回归护栏：满片编码长度（= [`crate::DGRAM_MAX`]）必须 ≤ quinn 默认配置的**最坏可发
+    /// datagram 下限**，否则 `send_datagram` 报 `TooLarge` → 发流泵首帧即停 → 远程画面黑屏。
+    ///
+    /// quinn 0.11 `TransportConfig::default()` 把 `initial_mtu`/`min_mtu` 都钉在
+    /// `INITIAL_MTU=1200`；每包可发上限 = `min_mtu − predict_1rtt_overhead − Datagram::SIZE_BOUND`。
+    /// 取最坏 1rtt 开销 32（flag 1 + CID 8 + PN 4 + 1-RTT tag 16 + 余量）与 `SIZE_BOUND=9`，
+    /// 下限 = `1200 − 32 − 9 = 1159`。本断言守住 `DGRAM_MAX` 永远不越回 1232 这类不可发值。
+    #[test]
+    fn dgram_max_stays_within_quinn_guaranteed_floor() {
+        const QUINN_GUARANTEED_FLOOR: usize = 1200 - 32 - 9; // = 1159，最坏可发下限
+        // 编译期护栏：`DGRAM_MAX` 是 const，越回 1232 这类不可发值时这里直接编译失败。
+        // const 块内不能用带格式化参数的 assert!（非 const 宏），故用静态消息。
+        const {
+            assert!(
+                crate::DGRAM_MAX <= QUINN_GUARANTEED_FLOOR,
+                "DGRAM_MAX 超 quinn 最坏可发下限，满片将 TooLarge → 发流黑屏"
+            );
+        }
+        // 运行时长度校验：满片实际编码长度（10B 报头 + FRAG_PAYLOAD_MAX）也必须落在下限内。
+        let full = VideoDgram {
+            seq: 0,
+            kind: 2,
+            frag: VideoDgram::FRAG_LAST_BIT,
+            flags: 0,
+            nalu: vec![0u8; VideoDgram::FRAG_PAYLOAD_MAX],
+        };
+        let enc = full.encode_plain().expect("满片可编码");
+        assert!(
+            enc.len() <= QUINN_GUARANTEED_FLOOR,
+            "满片编码 {}B 超 quinn 可发下限",
+            enc.len()
+        );
     }
 }

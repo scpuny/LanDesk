@@ -14,7 +14,7 @@
 //! - 用 `std::process::Command` 调外部 `import`/`ffmpeg`，**不引入新 Rust 依赖**，
 //!   `--offline --locked` 门与 CI 三平台矩阵不受影响（vendor/lock 不动）。
 //! - 缺 `import`/`ffmpeg` 或无 `DISPLAY`（CI 无 X、无 X11）时**自动 skip 不 fail**（eprintln 说明后 return）。
-//! - 截屏尺寸取 160×120（偶数）：实测 libx264 编码产物 ~757B < `lp::DGRAM_MAX`(1232)，
+//! - 截屏尺寸取 160×120（偶数）：实测 libx264 编码产物 ~757B < `lp::DGRAM_MAX`(1148)，
 //!   单 QUIC datagram 可发，无需分片。
 //! - **键鼠真注入（`/dev/uinput`）需真机**（容器无该设备），本测试不含，留 OK3568/桌面真机。
 //!
