@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk 双向剪贴板同步（FR-07）。M1 占位，M5 接入 arboard。"
+description = "LanDesk 双向剪贴板同步（FR-07）。回环抑制 ClipSyncer（lp 分段由 clipboard 模块承载）。"
 
 [dependencies]
 lp = { workspace = true }

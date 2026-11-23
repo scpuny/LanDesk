@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk 可选组件：QUIC 中继（FR-11，独立二进制，字节透传不解密）。M1 占位。"
+description = "LanDesk 可选组件：QUIC 中继（FR-11，独立二进制，字节透传不解密，M7 落地）。"
 
 [dependencies]
 quic-link = { workspace = true }
