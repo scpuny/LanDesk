@@ -1,5 +1,10 @@
 //! 受控端 CLI / 服务（形态A独立单文件二进制，ADR-A6 双角色同二进制）。
 //!
+//! **定位：形态A CLI（独立单文件二进制）。** 受控端**主能力已由 Tauri GUI
+//! （`ui` crate + `controlled_host.rs`：真平台采屏 + openh264 真编码）承担**；
+//! 此 CLI 走**合成源 + 占位编码**（`kind: 9`），且 `Config::default()` 仅为占位配置
+//! （未读 `--config` 路径），用于验证数据面链路，非发版主路径。
+//!
 //! P2② 起接**视频数据面发流**（矩阵 §7.5「画面」）：`Controlled` 起 QUIC 服务端
 //! （可选 mDNS 广播）→ 密码门禁 + ECDH 会话升级 [`landesk_core::Controlled::wait`] →
 //! 起 [`controlled::VideoPump`] 发流泵，按 fps 节拍「合成采集 → 占位编码 → NALU 分片 →
@@ -76,7 +81,7 @@ async fn run_pump(pump: &mut VideoPump, session: &landesk_core::OneClickSession)
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let _config = Config::default(); // 配置加载骨架（后续接 config 路径）
+    let _config = Config::default(); // 占位：默认配置（`--config` 路径尚未读盘，形态A CLI 未接 config 加载）
     let _ = cli.config;
     tracing_subscriber::fmt().init();
     tracing::info!(target: "controlled", ?cli, "受控端启动（P2② 接视频数据面发流）");

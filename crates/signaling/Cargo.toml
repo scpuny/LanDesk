@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk 轻信令客户端（FR-10）。M1 占位，M6 接入。"
+description = "LanDesk 轻信令客户端（FR-10，tokio-tungstenite + JSON envelope，M6 落地）。"
 
 [dependencies]
 ice = { workspace = true }
