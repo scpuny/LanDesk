@@ -721,7 +721,10 @@ onBeforeUnmount(() => {
         <div class="ld-sess-title" style="font-size:18px">{{ isConnLayerError(lastConnError) ? '连接未建立' : '鉴权失败，无法建立会话' }}</div>
         <div v-if="isConnLayerError(lastConnError)" class="ld-sess-desc">
           无法连上对方设备（网络层未打通，不是密码问题）。请确认对方已开启受控服务
-          （临时码通道默认开，或设置页填了「访问密码」），且本机防火墙放行 UDP 52000，再核对对方 IP 是否在线。
+          （临时码通道默认开，或设置页填了「访问密码」），再核对对方 IP 是否在线。
+          若对方是 <b>macOS</b>，多半是系统应用防火墙拦了 LanDesk 入站：请在对方 Mac 上打开
+          「系统设置 → 网络 → 防火墙 → 选项」，把 LanDesk 加入允许传入（或先关闭防火墙验证）；
+          其它平台请放行 UDP 52000 入站。
           <br />最近原因：{{ lastConnError }}
         </div>
         <div v-else class="ld-sess-desc">

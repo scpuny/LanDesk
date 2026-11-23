@@ -101,6 +101,17 @@ onMounted(loadConfig)
           </div>
         </div>
         <div class="ld-form-row">
+          <div class="ld-form-row__label">防火墙放行<small>其他设备连入本机需放行</small></div>
+          <div class="ld-form-row__control">
+            <span class="ld-form-help">
+              本机作为被控端时用 <b>UDP 52000</b> 接收连接。若别的设备「能发现但连不上」本机，通常是防火墙拦了入站：
+              <b>macOS</b> 到「系统设置 → 网络 → 防火墙 → 选项」把 LanDesk 设为允许传入；
+              <b>Windows</b> 在「Windows 安全中心 → 防火墙 → 允许应用」放行 LanDesk 的专用网络入站。
+              局域网内可先用「临时关闭防火墙」验证是否为此原因。
+            </span>
+          </div>
+        </div>
+        <div class="ld-form-row">
           <div class="ld-form-row__label">画质预设</div>
           <div class="ld-form-row__control">
             <button v-for="p in presets" :key="p.v" class="ld-chip-opt" :class="{ 'is-active': config.preset === p.v }" @click="pickPreset(p.v)">
