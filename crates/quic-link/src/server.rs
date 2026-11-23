@@ -6,7 +6,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use quinn::{Endpoint, ServerConfig, TransportConfig};
+use quinn::{Endpoint, ServerConfig};
 
 use crate::conn::QuicConnection;
 use crate::error::QuicLinkError;
@@ -41,7 +41,7 @@ impl QuicServer {
         let mut server_config =
             ServerConfig::with_single_cert(vec![tls.cert_der.clone()], tls.key.clone_key())
                 .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
-        server_config.transport_config(Arc::new(TransportConfig::default()));
+        server_config.transport_config(Arc::new(crate::transport_config()));
 
         let endpoint =
             Endpoint::server(server_config, listen).map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;

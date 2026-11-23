@@ -15,9 +15,11 @@
 
 use landesk_core::error::CoreError;
 use landesk_core::oneclick::{Controller, OneClickSession};
+use landesk_core::reconnect::ReconnectScheduler;
 use landesk_core::SessionState;
 use mdns::{DeviceAd, OnlineDevice};
 use quic_link::{ConnMode, QuicClient};
+use std::time::Duration;
 use thiserror::Error;
 
 use crate::session::{expand, ControlAction, ExpandError, SessionStatusView, SessionTargetView};
@@ -51,6 +53,19 @@ pub struct SessionManager {
     /// [`Self::take_video_rx`] 取走 `Receiver` 逐帧 `await recv()` 推给前端。
     /// `close`/再次 `connect` 时旧 `Receiver` 被 drop，泵任务 `send` 失败即退出。
     video_rx: Option<mpsc::Receiver<VideoFrameMsg>>,
+    // ---------- 掉线重连（FR-05.4）----------
+    /// 退避重连调度器（会话从 `Running` 掉线时起一个周期；`close` 停、成功复位）。
+    reconnect: Option<ReconnectScheduler>,
+    /// 最近一次重连尝试的拨号截止时刻（到点才真重拨，避免每 tick 都拨号）；
+    /// `None` = 无待拨（会话健在 / 已耗尽 / 等待主管下次 tick）。
+    reconnect_deadline: Option<std::time::Instant>,
+    /// 上一次成功建连的目标（掉线后重连重拨用，保留 ip/port/device_id）。
+    last_dev: Option<OnlineDevice>,
+    /// 上一次成功建连的凭据 / SNI（重连重拨复用，LAN 内网信任域内保留明文访问码）。
+    last_password: String,
+    last_sni: String,
+    /// 用户已主动 `close`：置 `true` 时重连主管停止（避免「已断开」又自动拨号回来）。
+    reconnect_stopped: bool,
 }
 
 /// `send_control` 的宿主级错误（无活跃会话 / 展开失败 / 底层会话错）。
@@ -118,6 +133,12 @@ impl SessionManager {
             mode: ConnMode::Inner,
             status: StatusBarModel::new(),
             video_rx: None,
+            reconnect: None,
+            reconnect_deadline: None,
+            last_dev: None,
+            last_password: String::new(),
+            last_sni: String::new(),
+            reconnect_stopped: false,
         }
     }
 
@@ -181,7 +202,31 @@ impl SessionManager {
     ///
     /// 成功返回折叠后的 [`SessionStatusView`]（`state_code="running"`）；密码错/不可达等
     /// 落 [`CoreError`]（`Auth`/`Handshake`/`Unreachable`），会话不建立。
+    ///
+    /// 同时**记住本次目标凭据**（`last_dev`/`last_password`/`last_sni`）并**复位重连周期**，
+    /// 供掉线后重连主管（[`Self::reconnect_tick`]）重拨同一设备（FR-05.4）。
     pub async fn connect(
+        &mut self,
+        dev: &OnlineDevice,
+        password: &str,
+        sni: &str,
+    ) -> Result<SessionStatusView, CoreError> {
+        // 记住本次目标 + 凭据（掉线重连据此重拨同一设备）。
+        self.last_dev = Some(dev.clone());
+        self.last_password = password.to_string();
+        self.last_sni = sni.to_string();
+        // 新会话：起一个新鲜退避调度器，清待拨截止 + 停止标志。
+        self.reconnect = Some(ReconnectScheduler::default_policy());
+        self.reconnect_deadline = None;
+        self.reconnect_stopped = false;
+        self.establish(dev, password, sni).await
+    }
+
+    /// 真正拨号 + 建立会话（[`connect`] 与重连主管 [`reconnect_tick`] 共用）。
+    ///
+    /// 成功把会话/目标/状态落位、复位退避计数、重启视频泵；失败落 [`CoreError`]，
+    /// 会话不建立（调用方据失败推进退避）。
+    async fn establish(
         &mut self,
         dev: &OnlineDevice,
         password: &str,
@@ -201,8 +246,162 @@ impl SessionManager {
         // 折叠状态事件进快照（FR-09.3）。
         self.status.apply(&CoreEvent::StateChanged(SessionState::Running));
         self.status.apply(&CoreEvent::ConnModeChanged(ConnMode::Inner));
+        // 成功（首连 / 重连成功）：复位退避计数，重连后强制 IDR 由受控端首帧承担（§4.2 第 4 行）。
+        if let Some(s) = &mut self.reconnect {
+            let _ = s.reset_on_success();
+        }
+        self.reconnect_deadline = None;
         self.start_video_pump();
         Ok(self.status_view())
+    }
+
+    /// 重连主管单步（FR-05.4，宿主周期驱动，~1s/tick）：
+    /// 探测活跃会话的 QUIC 连接是否掉线（idle 超时 / 对端关 / 网络断）；掉线则按
+    /// [`ReconnectScheduler`] 指数退避（1/2/4/8/16s ×5）重拨 `last_dev`，成功后复位回 `Running`；
+    /// 5 次全失败转 `NoPath` 停止重拨。[`close`] 置停止标志使本方法恒空转（不再自动拨号回来）。
+    ///
+    /// 健在（`Running` 且连接活着）时仅一次非阻塞 `is_closed()` 探测即返回；退避窗口未到点
+    /// 时只上报不拨号；到点才真拨一次（期间短暂持锁做 QUIC 握手，重连期画面本已中断，可接受）。
+    pub async fn reconnect_tick(&mut self) -> Option<SessionStatusView> {
+        // 用户已主动关闭：主管空转（下次 `connect` 会复位停止标志）。
+        if self.reconnect_stopped {
+            return Some(self.status_view());
+        }
+        // 掉线探测：无会话（Running 但会话没了）或活跃会话的 QUIC 连接已关。
+        let lost = match self.session.as_ref() {
+            Some(s) => s.is_closed(),
+            None => self.state == SessionState::Running,
+        };
+        if !lost {
+            // 健在：若处于重连态（对端已恢复），复位回 Running + 清退避。
+            if self.state == SessionState::Reconnecting {
+                if let Some(s) = &mut self.reconnect {
+                    let _ = s.reset_on_success();
+                }
+                self.reconnect = None;
+                self.reconnect_deadline = None;
+                self.state = SessionState::Running;
+                self.status.apply(&CoreEvent::StateChanged(SessionState::Running));
+            }
+            return Some(self.status_view());
+        }
+
+        // 已掉线：取退避调度器（`Copy` 出副本，避免跨 `establish` 的两次 `&mut self`）。
+        // 同时清掉旧会话的视频泵入端（旧泵在连接关闭时已退出）——宿主 SSE/轮询据此
+        // 干净停流（`take_video_rx` 返 None → 404 / `poll_video` 返空），重连成功后 `establish`
+        // 会 `start_video_pump` 重新起泵（浏览器 EventSource 自动重拉新流）。幂等。
+        self.video_rx = None;
+        let mut sched = *self.reconnect.get_or_insert_with(ReconnectScheduler::default_policy);
+
+        // 退避窗口未到点：仅上报（`state_code=reconnecting`），暂不拨号。
+        if let Some(dl) = self.reconnect_deadline {
+            if std::time::Instant::now() < dl {
+                return Some(self.status_view());
+            }
+        }
+        // 次数用尽：转 NoPath 停止重拨。
+        if sched.exhausted() {
+            if self.state != SessionState::NoPath {
+                self.state = SessionState::NoPath;
+                self.status.apply(&CoreEvent::StateChanged(SessionState::NoPath));
+            }
+            self.reconnect_deadline = None;
+            return Some(self.status_view());
+        }
+        // 到点拨号（复用上次目标 + 凭据）；无已记住目标则不重拨。
+        let Some(dev) = self.last_dev.clone() else {
+            return Some(self.status_view());
+        };
+        let pass = self.last_password.clone();
+        let sni = self.last_sni.clone();
+        // 拨号加超时护栏：黑洞主机（防火墙丢 UDP、无应答）下 quinn 握手可能长时间挂起，
+        // 本 tick 持共享锁做真握手，给 10s 上限防堵死其它会话命令（status/close/poll）。
+        // 超时视作一次失败推进退避，下个周期再试。
+        let dial = async { self.establish(&dev, &pass, &sni).await };
+        let ok = matches!(
+            tokio::time::timeout(Duration::from_secs(10), dial).await,
+            Ok(Ok(_))
+        );
+        if ok {
+            // `establish` 内已 `reset_on_success` + `state=Running`。
+            return Some(self.status_view());
+        }
+        // 失败（含超时）：推进一次退避（`step` 给出下次等待 + 推进后状态 Reconnecting/NoPath），写回。
+        let out = sched.step();
+        self.reconnect = Some(sched);
+        self.state = out.state;
+        self.status.apply(&CoreEvent::StateChanged(out.state));
+        self.reconnect_deadline = if sched.exhausted() {
+            None
+        } else {
+            Some(std::time::Instant::now() + out.wait)
+        };
+        Some(self.status_view())
+    }
+
+    /// 由宿主在把 [`Self`] 包进 `Arc<tokio::sync::Mutex<…>>` 后调用一次，起后台重连主管：
+    /// 每 ~1s 跑一次 [`Self::reconnect_tick`]（掉线探测 + 指数退避重拨）。
+    ///
+    /// 主管循环持有的是**共享锁的克隆**，非 `Self` 句柄——故可静态调用（不需 `&self`）。
+    /// 会话健在 / 未连接 / 已 `close` 时每次 tick 都是廉价空转（一次非阻塞 `is_closed()` 探测）。
+    /// 须在运行中的 tokio runtime 内调用（宿主 `block_on` 或 async 上下文）。
+    pub fn start_supervisor(shared: std::sync::Arc<tokio::sync::Mutex<Self>>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let mut mgr = shared.lock().await;
+                mgr.reconnect_tick().await;
+            }
+        });
+    }
+
+    /// 手动「立即重试」（FR-05.4，前端重连浮层按钮）：**跳过退避等待**，立即重拨 `last_dev`
+    /// （记住的 ip/port/凭据，不经 mDNS 在线表——断网期 mDNS 可能已消失，直接拨记住端点）。
+    ///
+    /// 成功复位回 `Running`（`establish` 内 `reset_on_success`）；失败则推进一次退避（主管续接）。
+    /// 会话健在 / 已 `close`（`reconnect_stopped`）/ 无记住目标 / 次数耗尽时幂等空转，恒出视图。
+    pub async fn reconnect_now(&mut self) -> Option<SessionStatusView> {
+        if self.reconnect_stopped {
+            return Some(self.status_view());
+        }
+        // 健在则无需重拨。
+        if let Some(s) = self.session.as_ref() {
+            if !s.is_closed() {
+                return Some(self.status_view());
+            }
+        }
+        // 取退避调度器（`Copy` 出副本，避免跨 `establish` 的两次 `&mut self`）。
+        let mut sched = *self.reconnect.get_or_insert_with(ReconnectScheduler::default_policy);
+        // 次数用尽不再重拨（保持 NoPath，等用户换目标）。
+        if sched.exhausted() {
+            return Some(self.status_view());
+        }
+        let Some(dev) = self.last_dev.clone() else {
+            return Some(self.status_view());
+        };
+        let pass = self.last_password.clone();
+        let sni = self.last_sni.clone();
+        // 拨号加 10s 超时护栏（黑洞主机防堵锁），与主管同一节奏。
+        let dial = async { self.establish(&dev, &pass, &sni).await };
+        let ok = matches!(
+            tokio::time::timeout(Duration::from_secs(10), dial).await,
+            Ok(Ok(_))
+        );
+        if ok {
+            self.reconnect_deadline = None;
+            return Some(self.status_view());
+        }
+        // 失败：推进一次退避 + 设下次待拨截止（主管会继续），写回。
+        let out = sched.step();
+        self.reconnect = Some(sched);
+        self.state = out.state;
+        self.status.apply(&CoreEvent::StateChanged(out.state));
+        self.reconnect_deadline = if sched.exhausted() {
+            None
+        } else {
+            Some(std::time::Instant::now() + out.wait)
+        };
+        Some(self.status_view())
     }
 
     /// 启动视频推流泵（P2②）：克隆会话的可共享视频 Datagram 句柄，后台循环
@@ -263,12 +462,17 @@ impl SessionManager {
 
     /// 优雅关闭会话（FR-02.4）：硬关 QUIC 连接 + 状态机落 `Closed` + 折叠快照。
     ///
-    /// 同时丢弃视频推流泵入端（`video_rx`），让后台泵任务因 `Sender` 无接收端而退出。
+    /// 同时丢弃视频推流泵入端（`video_rx`），让后台泵任务因 `Sender` 无接收端而退出；
+    /// 并**停止重连主管**（置 `reconnect_stopped`、清退避/待拨），避免「已断开」又自动拨号回来。
     pub fn close(&mut self) {
         if let Some(sess) = self.session.take() {
             sess.close(0, b"user");
         }
         self.video_rx = None;
+        // 停止重连主管 + 清退避状态（下次 `connect` 会复位这些标志）。
+        self.reconnect_stopped = true;
+        self.reconnect = None;
+        self.reconnect_deadline = None;
         if self.state != SessionState::Closed {
             self.state = SessionState::Closed;
             self.status.apply(&CoreEvent::StateChanged(SessionState::Closed));
@@ -277,12 +481,22 @@ impl SessionManager {
 
     /// 当前会话状态视图（未连时 `state_code="idle"`、无目标、度量为空）。
     pub fn status_view(&self) -> SessionStatusView {
+        // 重连进度：`Reconnecting` 态给下一次退避视图；`NoPath`（已耗尽）给「已停止」视图；
+        // 其余态无重连进度（保持默认 0/0/0/false/""）。
+        let reconnect = match self.state {
+            SessionState::Reconnecting => {
+                self.reconnect.as_ref().and_then(crate::reconnect_view::view_of)
+            }
+            SessionState::NoPath => Some(crate::reconnect_view::exhausted_view()),
+            _ => None,
+        };
         SessionStatusView::new(&self.state, self.mode, &self.status.encoder)
             .with_target(self.target.clone())
             .with_latency_ms(self.status.latency_ms)
             .with_loss_pct(self.status.loss_pct)
             .with_bitrate_kbps(self.status.bitrate_kbps)
             .with_reset(self.status.reset_events)
+            .with_reconnect(reconnect)
     }
 
     /// 是否已有活跃会话。
@@ -345,6 +559,67 @@ mod tests {
         // 重复 close 不 panic，状态仍 Closed（快照不重复累加重置事件）。
         assert_eq!(m.status_view().state_code, "closed");
         assert_eq!(m.status_view().reset, 0);
+    }
+
+    /// 重连态 `status_view` 带退避进度（FR-05.4）：`reconnecting` 给下次重试序号/退避/文案，
+    /// `nopath`（耗尽）给 `exhausted=true` 的「已停止」视图；其余态重连字段全默认 0/空/false。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_status_view_progress() {
+        use crate::reconnect_view::{exhausted_view, view_of};
+
+        let mut m = mgr();
+
+        // idle 态：无重连进度。
+        let v = m.status_view();
+        assert_eq!(v.reconnect_attempt, 0);
+        assert_eq!(v.reconnect_max, 0);
+        assert_eq!(v.reconnect_wait_secs, 0);
+        assert!(!v.reconnect_exhausted);
+        assert!(v.reconnect_label.is_empty());
+
+        // 手工置 Reconnecting + 退避调度器（已用 1 次）→ 视图给第 2/5 次、退避 2s。
+        m.state = SS::Reconnecting;
+        let mut sched = ReconnectScheduler::default_policy();
+        sched.step();
+        m.reconnect = Some(sched);
+        let v = m.status_view();
+        let expect = view_of(&sched).expect("not exhausted");
+        assert_eq!(v.state_code, "reconnecting");
+        assert_eq!(v.reconnect_attempt, expect.attempt, "第 2 次");
+        assert_eq!(v.reconnect_max, expect.max_attempts, "5 次上限");
+        assert_eq!(v.reconnect_wait_secs, expect.wait_secs, "退避 2s");
+        assert!(!v.reconnect_exhausted);
+        assert_eq!(v.reconnect_label, expect.label);
+
+        // 耗尽 → NoPath：给 exhausted 视图（次数=5、文案「已停止」）。
+        m.state = SS::NoPath;
+        let v = m.status_view();
+        assert_eq!(v.state_code, "nopath");
+        let ex = exhausted_view();
+        assert_eq!(v.reconnect_max, ex.max_attempts, "次数=5");
+        assert!(v.reconnect_exhausted);
+        assert!(v.reconnect_label.contains("已停止"));
+    }
+
+    /// `close` 停重连主管（FR-02.4）：置 `reconnect_stopped`、清退避调度器 + 待拨截止，
+    /// 避免「已断开」后台主管又把号拨回去；`reconnect_tick` 见停止标志即恒空转。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn close_stops_reconnect() {
+        use landesk_core::reconnect::ReconnectScheduler as RS;
+        let mut m = mgr();
+        // 先造一个「掉线重连中」的现场：Reconnecting + 退避调度器 + 待拨截止。
+        m.state = SS::Reconnecting;
+        m.reconnect = Some(RS::default_policy());
+        m.reconnect_deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+        // close 应停止主管 + 清退避状态。
+        m.close();
+        assert!(m.reconnect_stopped, "close 置停止标志");
+        assert!(m.reconnect.is_none(), "close 清退避调度器");
+        assert!(m.reconnect_deadline.is_none(), "close 清待拨截止");
+        assert_eq!(m.status_view().state_code, "closed");
+        // 停止标志下 `reconnect_tick` 恒空转（不落 Reconnecting/NoPath，不重拨）。
+        let v = m.reconnect_tick().await.expect("tick 出视图");
+        assert_eq!(v.state_code, "closed", "已停止主管下 tick 不改变状态");
     }
 
     /// `SessionState` 全 7 态码经 manager 视图自洽（与 `session::state_code_all_seven` 交叉验证）。

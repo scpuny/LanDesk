@@ -70,6 +70,21 @@ pub fn schedule_of(sched: &ReconnectScheduler) -> ReconnectSchedule {
     }
 }
 
+/// 已耗尽（重试次数用尽、转 [`landesk_core::SessionState::NoPath`]）的合成视图。
+///
+/// [`view_of`] 在耗尽时直接返 `None`，但 `NoPath` 态的 [`SessionManager::status_view`]
+/// 仍需给前端一个「已停止重试」的进度快照（次数=策略上限、文案「已停止」）；本助手补这一格。
+pub fn exhausted_view() -> ReconnectView {
+    let s = ReconnectScheduler::default_policy();
+    ReconnectView {
+        attempt: s.max_attempts(),
+        max_attempts: s.max_attempts(),
+        wait_secs: 0,
+        exhausted: true,
+        label: "重连已停止（重试次数用尽）".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

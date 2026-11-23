@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use quinn::{Connection, Endpoint, RecvStream, SendStream, ServerConfig, TransportConfig};
+use quinn::{Connection, Endpoint, RecvStream, SendStream, ServerConfig};
 use rand::RngCore;
 
 use crate::error::QuicLinkError;
@@ -251,7 +251,7 @@ impl RelayEndpoint {
         let mut server_config =
             ServerConfig::with_single_cert(vec![tls.cert_der.clone()], tls.key.clone_key())
                 .map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
-        server_config.transport_config(Arc::new(TransportConfig::default()));
+        server_config.transport_config(Arc::new(crate::transport_config()));
         let endpoint =
             Endpoint::server(server_config, listen).map_err(|e| QuicLinkError::EndpointInit(e.to_string()))?;
         Ok(Self { endpoint, tls })

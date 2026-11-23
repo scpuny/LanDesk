@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk ICE/STUN NAT 打洞（FR-05.2）。M1 占位，M6 接入。"
+description = "LanDesk ICE/STUN NAT 打洞（FR-05.2，STUN 客户端 + 候选管理，M6 落地）。"
 
 [dependencies]
 thiserror = { workspace = true }

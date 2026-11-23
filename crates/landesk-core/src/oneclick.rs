@@ -173,6 +173,14 @@ impl OneClickSession {
         self.conn.video_tx()
     }
 
+    /// 非阻塞探测本会话的 QUIC 连接是否已关闭（掉线 / idle 超时 / 对端 close）。
+    ///
+    /// 供会话重连编排（`SessionManager`）判断「会话是否掉线」——`close_reason` 非空即已关，
+    /// 不阻塞、不占控制流锁。
+    pub fn is_closed(&self) -> bool {
+        self.conn.is_closed()
+    }
+
     /// 优雅关闭会话。
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.conn.close(code, reason);
