@@ -19,7 +19,7 @@
 //!
 //! 本模块可被环回测试离线验证（mdns 多播部分 `#[ignore]`，QUIC + 握手部分走 127.0.0.1）。
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use quinn::{RecvStream, SendStream};
@@ -293,9 +293,13 @@ impl Controller {
     }
 
     fn resolve(&self, dev: &OnlineDevice) -> Result<SocketAddr, CoreError> {
-        let s = format!("{}:{}", dev.ip, dev.port);
-        s.parse()
-            .map_err(|_| CoreError::Unreachable(format!("bad device addr {}", s)))
+        // 先 parse 出 IpAddr（v4/v6 都认），再用 SocketAddr::new 组目标——
+        // 旧写法 `format!("{ip}:{port}")` 对 IPv6 拼不出合法 `SocketAddr`
+        // （合法形式是 `[fe80::...]:52000`），导致跨机发现落到 IPv6 时 parse 必失败。
+        let ip: IpAddr = dev.ip.parse().map_err(|_| {
+            CoreError::Unreachable(format!("bad device ip {:?} (dev {})", dev.ip, dev.ad.name))
+        })?;
+        Ok(SocketAddr::new(ip, dev.port))
     }
 }
 
@@ -340,83 +344,120 @@ impl Controlled {
         Ok(())
     }
 
-    /// 等待一条连接并完成握手（密码门禁 + ECDH 会话升级）。
+    /// 等待一条连接并完成握手（单密码门禁 + ECDH 会话升级）。
     ///
-    /// 密码错 → 两侧 bootstrap enc_key 不一致 → AuthReq 的 GCM tag 校验直接失败
-    /// → [`CoreError::Auth`]；或 proof 不匹配 → `AuthRes{code=1}` 后关闭。
+    /// 等价 [`Self::wait_any`] 传单个候选：密码错 → 两侧 bootstrap enc_key 不一致 →
+    /// AuthReq 的 GCM tag 校验直接失败 → [`CoreError::Auth`]；或 proof 不匹配 →
+    /// `AuthRes{code=1}` 后关闭。
+    ///
+    /// 保留此入口让旧调用点（`apps/controlled` CLI / 单测 / `manager` 环路）不动。
     pub async fn wait(&self, password: &str) -> Result<OneClickSession, CoreError> {
+        self.wait_any(&[password.to_string()]).await
+    }
+
+    /// 等待一条连接，对**多个候选密码**做门禁（任一通过即放行）+ ECDH 会话升级。
+    ///
+    /// 双凭证模型（访问密码 + 临时密码）：受控端把「访问密码」与「当前有效临时码」
+    /// 都放进 `candidates`，控制端无论填哪个都能连上。
+    ///
+    /// ## 为什么可以「一条连接试多密码」
+    ///
+    /// 密码只影响**应用层 GCM 控制帧**（QUIC/TLS 握手本身与密码无关）：
+    /// 每个候选密码各自 `bootstrap::derive` 出独立的 `enc_key` + 方向前缀。
+    /// 客户端用**同一个密码**加密 AuthReq 且算 proof，故：
+    /// - 命中某候选 → 该候选 GCM tag 校验通过 + proof 匹配 → 放行；
+    /// - 全未命中 → 所有候选 GCM tag 都校验不过 → 读不出明文 → `code=1` 关闭。
+    ///
+    /// 实现：QUIC 连接接受一次（`enc_key` 仅作连接占位默认 GCM，控制帧各自用候选密钥），
+    /// 控制流打开一次，AuthReq 密文**读一次**，然后逐候选重试 `ControlFrame::decrypt`
+    /// （错密码 GCM tag 不过 → 跳过；对密码 tag 过 → 校 proof → ECDH 升级）。
+    ///
+    /// `candidates` 为空等价「无任何有效凭证」→ 接受连接后直接 `code=1` 关闭。
+    pub async fn wait_any(&self, candidates: &[String]) -> Result<OneClickSession, CoreError> {
         let device_id = id_to_device_bytes(&self.device_id);
-        let expected_proof = derive_password(password, &device_id);
-        let bootstrap = crate::bootstrap::derive(&self.device_id, password);
+        // 服务端 ECDH 材料只生成一次（与密码无关）：命中哪条候选都用它完成升级。
         let hs = ServerHandshake::new();
 
+        // 接受 QUIC 连接（TLS 握手，密码无关）。enc_key 仅作连接占位默认 GCM
+        // （控制帧各自用候选密钥重新构造 LpGcm），传 `[0;32]` 明示「真密钥逐候选派生」。
         let conn = self
             .server
-            .accept(bootstrap.enc_key)
+            .accept([0u8; 32])
             .await
             .map_err(CoreError::Quic)?;
-
-        // 认证隧道（bootstrap 密钥）：S 读 AuthReq(prefix_cs)，写 AuthRes(prefix_sc)。
-        // 密码错 → bootstrap.enc_key 不一致 → 下行这步 tag 校验直接失败。
-        let cs = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_cs);
-        let sc = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_sc);
         let (mut ssend, mut srecv) = conn.accept_control_stream().await?;
 
+        // 读 AuthReq 密文一次（对同一段密文逐候选重试解密，避免重复阻塞读流）。
         let req_cipher = conn.read_control_cipher(&mut srecv).await?;
-        let req_frame =
-            ControlFrame::decrypt(&cs, &bootstrap.enc_key, 1, |s| s > 0, &req_cipher)
-                .map_err(|e| CoreError::Auth(format!("auth request 校验失败: {e}")))?;
 
-        match req_frame.msg {
-            ControlMsg::AuthReq(r) => {
-                // 密码门禁：恒时比较 PBKDF2 证明（不传/不比明文，§0.2 / NFR-03）。
-                if !const_eq32(&r.proof, &expected_proof) {
-                    let res = ControlFrame {
-                        msg: ControlMsg::AuthRes(hs.auth_result(1)), // code=1 密码错
-                        seq: 1,
-                    };
-                    let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res)?;
-                    conn.write_control_cipher(&mut ssend, &res_cipher)
-                        .await?;
-                    warn!(remote = %conn.remote_addr(), "密码证明不匹配，拒绝");
-                    conn.close(1, b"auth failed");
-                    return Err(CoreError::Auth("password invalid (code=1)".into()));
-                }
+        for cand in candidates {
+            let bootstrap = crate::bootstrap::derive(&self.device_id, cand);
+            let cs = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_cs);
+            let sc = LpGcm::with_prefix(bootstrap.enc_key, bootstrap.prefix_sc);
+            let expected_proof = derive_password(cand, &device_id);
 
-                // ECDH 会话升级：本端私钥 + 对端公钥 + 双 nonce。
-                let sk = session_keys(
-                    &hs.keypair,
-                    &X25519Pub(r.client_x25519),
-                    &r.client_nonce,
-                    &hs.server_nonce,
-                )
-                .map_err(|e| CoreError::Handshake(e.to_string()))?;
-                let res = ControlFrame {
-                    msg: ControlMsg::AuthRes(hs.auth_result(0)),
-                    seq: 1,
-                };
-                let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res)?;
-                conn.write_control_cipher(&mut ssend, &res_cipher)
-                    .await?;
-                let s_tx = LpGcm::with_prefix(sk.enc_key, sk.prefix_sc);
-                let s_rx = LpGcm::with_prefix(sk.enc_key, sk.prefix_cs);
-                debug!(remote = %conn.remote_addr(), "一键握手成功（ECDH 会话升级），Running");
-                Ok(OneClickSession::established(
-                    conn,
-                    ssend,
-                    srecv,
-                    sk.enc_key,
-                    s_tx, // S 端发出方向 = prefix_sc
-                    s_rx, // S 端接收方向 = prefix_cs
-                    quic_link::ConnMode::Inner,
-                ))
-            }
-            other => {
-                warn!(?other, "握手帧类型不符");
+            // 该候选 GCM tag 不过（客户端不是用这个密码加密的）→ 跳下一候选。
+            let Ok(req_frame) =
+                ControlFrame::decrypt(&cs, &bootstrap.enc_key, 1, |s| s > 0, &req_cipher)
+            else {
+                continue;
+            };
+
+            let ControlMsg::AuthReq(r) = &req_frame.msg else {
+                // 帧类型不符（不是密码问题）→ 直接断。
+                warn!(remote = %conn.remote_addr(), "握手帧类型不符");
                 conn.close(2, b"bad handshake frame");
-                Err(CoreError::Handshake("expected AuthRequest".into()))
+                return Err(CoreError::Handshake("expected AuthRequest".into()));
+            };
+
+            // 密码门禁：恒时比较该候选密码的 PBKDF2 证明（NFR-03）。
+            if !const_eq32(&r.proof, &expected_proof) {
+                // GCM 过但 proof 不符（正常情况下不会发生：客户端用同一密码加密+算 proof）→ 视作错密码，试下一候选。
+                warn!(remote = %conn.remote_addr(), "某候选 GCM 通过但 proof 不符，试下一候选");
+                continue;
             }
+
+            // 命中：ECDH 会话升级。
+            let sk = session_keys(
+                &hs.keypair,
+                &X25519Pub(r.client_x25519),
+                &r.client_nonce,
+                &hs.server_nonce,
+            )
+            .map_err(|e| CoreError::Handshake(e.to_string()))?;
+            let res = ControlFrame {
+                msg: ControlMsg::AuthRes(hs.auth_result(0)),
+                seq: 1,
+            };
+            let res_cipher = ControlFrame::encrypt(&sc, &bootstrap.enc_key, &res)?;
+            conn.write_control_cipher(&mut ssend, &res_cipher)
+                .await?;
+            let s_tx = LpGcm::with_prefix(sk.enc_key, sk.prefix_sc);
+            let s_rx = LpGcm::with_prefix(sk.enc_key, sk.prefix_cs);
+            debug!(
+                remote = %conn.remote_addr(),
+                cand_len = cand.len(),
+                "一键握手成功（命中某候选凭证，ECDH 会话升级），Running"
+            );
+            return Ok(OneClickSession::established(
+                conn,
+                ssend,
+                srecv,
+                sk.enc_key,
+                s_tx, // S 端发出方向 = prefix_sc
+                s_rx, // S 端接收方向 = prefix_cs
+                quic_link::ConnMode::Inner,
+            ));
         }
+
+        // 所有候选都未命中 → 无法用任何已知密钥加密 AuthRes 回复，直接关闭。
+        warn!(
+            remote = %conn.remote_addr(),
+            candidates = candidates.len(),
+            "所有候选凭证均未通过门禁，拒绝"
+        );
+        conn.close(1, b"auth failed");
+        Err(CoreError::Auth("password invalid (code=1)".into()))
     }
 
     /// 优雅下线（关闭 QUIC 端点 + 注销 mDNS）。

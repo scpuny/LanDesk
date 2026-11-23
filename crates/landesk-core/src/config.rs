@@ -43,6 +43,25 @@ pub struct Config {
     pub dirty_rect: bool,
     /// 日志级别。
     pub log_level: LogLevel,
+    /// 是否启用**临时密码通道**（6 位一次性配对码，给短期放别人进来；
+    /// 与访问密码是**独立的两道门**，任一通过即可连接。默认开。
+    /// 旧配置无此字段 → serde 回填默认 `true`（向后兼容：装了就能用）。）
+    #[serde(default = "default_temp_password_enabled")]
+    pub temp_password_enabled: bool,
+    /// 临时密码自动过期时长（秒）。到达 TTL 后受控端换新码，旧码作废。
+    /// 默认 300s（5 分钟）；最小 30s 防误配。
+    #[serde(default = "default_temp_password_ttl_secs")]
+    pub temp_password_ttl_secs: u32,
+}
+
+/// 临时密码通道默认开（装了且开着的 LanDesk 随时可被临时码连接）。
+fn default_temp_password_enabled() -> bool {
+    true
+}
+
+/// 临时密码默认 5 分钟过期。
+fn default_temp_password_ttl_secs() -> u32 {
+    300
 }
 
 impl Default for Config {
@@ -60,6 +79,8 @@ impl Default for Config {
             preset: EncodePreset::Balanced,
             dirty_rect: true,
             log_level: LogLevel::default(),
+            temp_password_enabled: true,
+            temp_password_ttl_secs: 300,
         }
     }
 }
@@ -128,6 +149,17 @@ mod tests {
         assert!(c.relay_enabled, "默认中继开（FR-11.2 可选）");
         assert!(c.mdns_enabled, "默认内网 mDNS 发现（FR-01）");
         assert_eq!(c.preset, EncodePreset::Balanced);
+        assert!(c.temp_password_enabled, "临时密码通道默认开（装了即可被临时码连接）");
+        assert_eq!(c.temp_password_ttl_secs, 300, "临时密码默认 5 分钟过期");
+    }
+
+    #[test]
+    fn legacy_config_json_missing_new_fields_backfills_defaults() {
+        // 旧版本落盘的配置没有 temp_password_* 字段 → 读回走 serde default，不报错。
+        let legacy = r#"{"device_name":"old","password":"x","mdns_enabled":true,"signaling_enabled":false,"signaling_url":null,"stun_url":null,"relay_enabled":true,"relay_url":null,"preset":"Balanced","dirty_rect":true,"log_level":"Info"}"#;
+        let c = Config::from_json(legacy).expect("legacy json must parse");
+        assert!(c.temp_password_enabled, "缺字段回填默认 true");
+        assert_eq!(c.temp_password_ttl_secs, 300, "缺字段回填默认 300");
     }
 
     #[test]

@@ -169,3 +169,60 @@ async fn oneclick_wrong_password_rejected() {
         "错密码应落入 auth/handshake/quic 错误，实际: {msg}"
     );
 }
+
+/// 多候选门禁：客户端用候选表**第二位**的密码连（首位是访问密码），
+/// 命中非首位候选也应放行——验证「访问密码 OR 临时密码任一通过」。
+#[tokio::test(flavor = "multi_thread")]
+async fn wait_any_hits_non_first_candidate() {
+    let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+    let controlled = Controlled::new(listen, &["localhost"], DEV_ID.into()).expect("controlled bind");
+    let port = controlled.server().local_addr().expect("listen addr").port();
+
+    let client = QuicClient::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        controlled.server().tls(),
+    )
+    .expect("client init");
+    let controller = Controller::new(None, client);
+    let dev = device(port);
+
+    // 受控端候选表：[访问密码, 临时码]。客户端用临时码（第二位）连接。
+    let candidates = vec!["access-pw".to_string(), "temp-123".to_string()];
+    let (_, s_session) = tokio::try_join!(
+        controller.connect(&dev, "temp-123", "localhost"),
+        controlled.wait_any(&candidates),
+    )
+    .expect("connect + wait_any must hit the temp code candidate");
+
+    assert_eq!(s_session.state(), SessionState::Running, "命中第二位候选应建会话");
+    s_session.close(0, b"done");
+}
+
+/// 多候选门禁：客户端用的密码**不在**候选表内 → 所有候选 GCM 都不过 → 拒绝。
+#[tokio::test(flavor = "multi_thread")]
+async fn wait_any_rejects_when_no_candidate_matches() {
+    let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+    let controlled = Controlled::new(listen, &["localhost"], DEV_ID.into()).expect("controlled bind");
+    let port = controlled.server().local_addr().expect("listen addr").port();
+
+    let client = QuicClient::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        controlled.server().tls(),
+    )
+    .expect("client init");
+    let controller = Controller::new(None, client);
+    let dev = device(port);
+
+    // 候选表里没有 "nope" → 应全候选失败。
+    let candidates = vec!["access-pw".to_string(), "temp-123".to_string()];
+    let err = tokio::try_join!(
+        controller.connect(&dev, "nope", "localhost"),
+        controlled.wait_any(&candidates),
+    )
+    .expect_err("no matching candidate must fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("auth") || msg.contains("quic"),
+        "无候选命中应落入 auth/quic 错误，实际: {msg}"
+    );
+}

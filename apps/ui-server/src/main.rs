@@ -65,8 +65,8 @@ struct Ctx {
     /// 会话管理器（P2 遗留 ①，矩阵 §7.5）：QUIC 客户端 + 活跃会话 + 状态栏折叠。
     session: Arc<tokio::sync::Mutex<SessionManager>>,
     /// GUI 兼作受控端（提醒4）：QUIC 服务端 accept 任务保活（Arc 共享，drop 时 abort）。
-    /// 下划线前缀：仅持有保活，无读取点（状态走 `/api/controlled-status` 从配置派生）。
-    _controlled: Arc<Option<ControlledHost>>,
+    /// 现被 `/api/local-info` 读取 [`ControlledHost::current_temp_code`]（展示与门禁同源的当前临时码）。
+    controlled: Arc<Option<ControlledHost>>,
     static_dir: PathBuf,
 }
 
@@ -305,7 +305,7 @@ async fn main() {
                     .expect("quic client init"),
             ),
         )),
-        _controlled: controlled,
+        controlled,
         static_dir: static_dir.clone(),
     };
 
@@ -373,15 +373,18 @@ async fn main() {
             get(|State(ctx): State<Ctx>| async move {
                 let cfg = ctx.store.load_or_init().unwrap_or_default();
                 let device_code = device_code_from(&cfg.device_name);
-                let serving = cfg
+                // 双凭证门禁：访问密码非空 OR 临时通道开（默认开）→ serving。
+                let access_set = cfg
                     .password
                     .as_deref()
                     .map(|p| !p.trim().is_empty())
                     .unwrap_or(false);
+                let serving = access_set || cfg.temp_password_enabled;
                 Json(landesk_ui::ControlledStatus {
                     serving,
                     port: landesk_ui::DEFAULT_PORT,
                     device_code,
+                    temp_code_enabled: cfg.temp_password_enabled,
                 })
                 .into_response()
             }),
@@ -416,8 +419,9 @@ async fn main() {
             }),
         )
         // 本机信息（P2.8「本机信息 API」，矩阵 §7.5）：喂设备页左栏「本机卡」。
-        // 设备码/临时密码由本机态派生（`device_code_from` 稳定摘要 + `gen_temp_password`）；
-        // mDNS 广播态 = 监听器是否起来了；`enc` 未接数据面探测，保守空值。
+        // 设备码由 `device_code_from` 稳定摘要；**临时密码读受控端当前有效码**（与门禁同源，
+        // 所见即可连——不再是每次随机的假码）；无受控服务（双凭证都关）时回退 `gen_temp_password`
+        // 仅作预览。mDNS 广播态 = 监听器是否起来了；`enc` 未接数据面探测，保守空值。
         .route(
             "/api/local-info",
             get(|State(ctx): State<Ctx>| async move {
@@ -426,7 +430,13 @@ async fn main() {
                 // 本机在线态由本机配置决定；不能按远端设备表/发现结果推断本机是否在线。
                 let online = cfg.mdns_enabled;
                 let device_code = device_code_from(&cfg.device_name);
-                let temp_password = gen_temp_password();
+                // 受控端当前有效临时码（默认通道开 → 有值；双凭证都关 → 回退随机预览）。
+                let temp_password = ctx
+                    .controlled
+                    .as_ref()
+                    .as_ref()
+                    .and_then(|h| h.current_temp_code())
+                    .unwrap_or_else(gen_temp_password);
                 let info = local_info_of(&cfg, &device_code, &temp_password, vec![], mdns_advertising, online);
                 Json(info).into_response()
             }),
