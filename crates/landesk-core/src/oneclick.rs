@@ -19,7 +19,7 @@
 //!
 //! 本模块可被环回测试离线验证（mdns 多播部分 `#[ignore]`，QUIC + 握手部分走 127.0.0.1）。
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use quinn::{RecvStream, SendStream};
@@ -293,9 +293,13 @@ impl Controller {
     }
 
     fn resolve(&self, dev: &OnlineDevice) -> Result<SocketAddr, CoreError> {
-        let s = format!("{}:{}", dev.ip, dev.port);
-        s.parse()
-            .map_err(|_| CoreError::Unreachable(format!("bad device addr {}", s)))
+        // 先 parse 出 IpAddr（v4/v6 都认），再用 SocketAddr::new 组目标——
+        // 旧写法 `format!("{ip}:{port}")` 对 IPv6 拼不出合法 `SocketAddr`
+        // （合法形式是 `[fe80::...]:52000`），导致跨机发现落到 IPv6 时 parse 必失败。
+        let ip: IpAddr = dev.ip.parse().map_err(|_| {
+            CoreError::Unreachable(format!("bad device ip {:?} (dev {})", dev.ip, dev.ad.name))
+        })?;
+        Ok(SocketAddr::new(ip, dev.port))
     }
 }
 
