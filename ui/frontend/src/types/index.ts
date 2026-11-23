@@ -180,6 +180,17 @@ export interface LocalInfo {
   online: boolean
 }
 
+/** 受控服务状态（对齐后端 `ui::ControlledStatus`，camelCase 出参）。
+ *  `serving` = 访问密码非空 **或** 临时码通道开（`serving_for`），二者任一为真即 52000 监听；
+ *  `false` 表示本机未起受控服务（mDNS 仍可广播被发现，但 52000 无人接 → 控制端 QUIC 拨号超时）。
+ *  `tempCodeEnabled` 供前端提示「临时码可用 / 仅访问密码」。 */
+export interface ControlledStatus {
+  serving: boolean
+  port: number
+  deviceCode: string
+  tempCodeEnabled?: boolean
+}
+
 /** Toast 提示 */
 export interface ToastItem {
   id: number

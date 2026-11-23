@@ -1,7 +1,7 @@
 // LanDesk 前端 ↔ 后端桥接封装（对齐 ui/src-tauri 的 Tauri 命令 + apps/ui-server 的 REST）。
 // 双轨降级：Tauri 宿主走 invoke；浏览器走 REST /api/*。
 // 出参为 landesk-ui 的可序列化模型（JSON 直进组件）。
-import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo, VideoFrameMsg } from '../types/index'
+import type { ConnMode, DeviceRow, LanDeskConfig, LocalInfo, VideoFrameMsg, ControlledStatus } from '../types/index'
 import type { ControlAction, SessionResp } from '../types/index'
 
 /** ICE 打洞三态（对齐 `ice::HoleResult`，serde 默认按变体名序列化）。 */
@@ -157,6 +157,16 @@ export const landesk = {
     return isTauri()
       ? tauriInvoke<LocalInfo>('local_info')
       : rest<LocalInfo>('/api/local-info')
+  },
+
+  /** 受控服务状态（本机是否真正在 52000 监听，区别于 mDNS「在线」）。
+   *  - Tauri：`controlled_status` 命令（按设置页访问密码从配置派生 serving）。
+   *  - REST：`/api/controlled-status`。
+   *  `serving=false` = 访问密码为空 / 端口未起 → 控制端 QUIC 拨号会超时（nmap 看 52000 closed）。 */
+  controlledStatus(): Promise<ControlledStatus> {
+    return isTauri()
+      ? tauriInvoke<ControlledStatus>('controlled_status')
+      : rest<ControlledStatus>('/api/controlled-status')
   },
 
   /** 日志查询（P2.8「日志查询 API」，矩阵 §7.5）：环形缓冲 + 级别/关键字过滤。

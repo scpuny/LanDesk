@@ -111,12 +111,24 @@ async function confirmCloseWindow(): Promise<void> {
 /** 拿当前目标 + 输入的访问密码真正建连（会话窗「建立连接」/鉴权失败「重新验证」共用）。
  *  密码可空：后端受控服务按密码门禁，空密码会明确失败（对方未开启受控服务 / 密码错），
  *  由后端错误区分，不在前端猜测。 */
+// 最近一次建连失败原因（区分「连接未建立」与「密码错」，避免把 QUIC 超时误报成临时密码错）。
+const lastConnError = ref('')
+// 连接层失败（QUIC 拨号/握手）：受控端未开服务 / 网络不通 / 防火墙拦 UDP。
+function isConnLayerError(e: string): boolean {
+  const s = e.toLowerCase()
+  return s.includes('quic') || s.includes('timed out') || s.includes('timeout')
+    || s.includes('unreachable') || s.includes('connect') || s.includes('handshake')
+}
 async function connectFromTarget(): Promise<void> {
   if (!state.sessionTarget) { toast('没有连接目标', 'warning'); return }
   setState('auth')
   const r = await connectSession(state.sessionTarget.id, password.value)
-  if (r.ok) { setState('running'); toast('会话已建立，正在接收画面') }
-  else { setState('authfailed'); toast(r.error || '鉴权失败', 'error') }
+  if (r.ok) { lastConnError.value = ''; setState('running'); toast('会话已建立，正在接收画面') }
+  else {
+    lastConnError.value = r.error || '建连失败'
+    // 连接层失败（未打通）与真正的密码错都落 authfailed 视图，但文案按真实原因区分。
+    setState('authfailed'); toast(r.error || '建连失败', 'error')
+  }
 }
 
 async function verify() {
@@ -631,16 +643,24 @@ onBeforeUnmount(() => {
 
       <!-- 鉴权失败 -->
       <div v-else-if="state.sessionState === 'authfailed'" class="ld-sess-overlay">
-        <div class="ld-sess-bigicon is-danger"><Icon name="lock" :size="30" /></div>
-        <div class="ld-sess-title" style="font-size:18px">鉴权失败，无法建立会话</div>
-        <div class="ld-sess-desc">对方设备的访问密码与当前有效的临时密码均未通过校验，请核对后重试（临时码到期会自动换新，旧码作废）</div>
+        <div class="ld-sess-bigicon is-danger"><Icon :name="isConnLayerError(lastConnError) ? 'wifioff' : 'lock'" :size="30" /></div>
+        <div class="ld-sess-title" style="font-size:18px">{{ isConnLayerError(lastConnError) ? '连接未建立' : '鉴权失败，无法建立会话' }}</div>
+        <div v-if="isConnLayerError(lastConnError)" class="ld-sess-desc">
+          无法连上对方设备（网络层未打通，不是密码问题）。请确认对方已开启受控服务
+          （临时码通道默认开，或设置页填了「访问密码」），且本机防火墙放行 UDP 52000，再核对对方 IP 是否在线。
+          <br />最近原因：{{ lastConnError }}
+        </div>
+        <div v-else class="ld-sess-desc">
+          对方设备的访问密码与当前有效的临时码均未通过校验，请核对后重试（临时码到期会自动换新，旧码作废）。
+          <br />最近原因：{{ lastConnError }}
+        </div>
         <div class="ld-sess-password-card">
           <div style="display:flex;align-items:center;gap:8px">
             <Icon name="key" :size="16" style="color:var(--ll-color-brand)" />
-            <b>重新输入访问密码 / 临时密码</b>
+            <b>重新输入访问密码 / 临时码</b>
           </div>
-          <input v-model="password" type="password" class="ll-input ll-input--error" placeholder="访问密码，或 6 位临时密码" />
-          <div class="ld-form-error">密码不正确，请向设备所有者索取最新访问密码或最新临时码</div>
+          <input v-model="password" type="password" class="ll-input ll-input--error" placeholder="访问密码，或 6 位临时码" />
+          <div v-if="!isConnLayerError(lastConnError)" class="ld-form-error">密码不正确，请向设备所有者索取最新访问密码或最新临时码</div>
           <div class="ld-sess-actions">
             <button class="ll-btn ll-btn--primary" @click="verify"><Icon name="shield" :size="14" /> 重新验证</button>
             <button class="ll-btn ll-btn--default" @click="toast('已发送一次性密码请求', 'info')"><Icon name="zap" :size="14" /> 请求新临时码</button>
