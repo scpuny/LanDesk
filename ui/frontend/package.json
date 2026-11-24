@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:diag": "node ../../scripts/verify-diagnostics.mjs"
   },
   "dependencies": {
     "vue": "^3.4.0"

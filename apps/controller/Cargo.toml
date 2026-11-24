@@ -4,10 +4,15 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "LanDesk 控制端（独立单文件二进制，形态A）。M1 占位。"
+description = "LanDesk 控制端：GUI 为主，另提供 headless 设备发现/画面探针供自动化门禁使用。"
 
 [dependencies]
 landesk-core = { workspace = true }
+mdns = { workspace = true }
+quic-link = { workspace = true }
+lp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
