@@ -149,3 +149,36 @@ controller probe \
 - `./scripts/test-e2e/vbox-smoke.sh --no-start`：不启动 VM，验证脚本流程与诚实失败行为。
 - 完整跑：脚本会 `VBoxManage startvm` → arp 探活 → 调 `controller device-list/probe` 自动判定 → 生成报告。
 - 注意：脚本**不进 guest 内部**装包/启动服务，guest 内 GUI 操作仍是人工打勾项；报告含 JSON 证据与回归清单。
+
+---
+
+## 踩坑 3：CI "success" 是假绿灯 —— GUI 其实全失败（2026-11-24）
+
+首个测试包 run 三平台步骤全绿、artifact 也产出了，但抓日志发现：
+
+```
+== GUI dmg/app x86_64
+   Error `"tauri.conf.json"` error on `bundle > macOS > infoPlist`: {...} is not of types "null", "string"
+GUI build x86_64 failed, skipping
+```
+
+**根因**：`bundle.macOS.infoPlist` 被写成了对象。Tauri 2 官方 schema 明确定义：
+`infoPlist` 是 `string | null`，语义为 "Path to a Info.plist file to merge with the default Info.plist"，
+且 Tauri 会自动读配置文件同目录的 `Info.plist`。写对象 → 配置校验失败 → `tauri build` 直接退出。
+
+**更根本的问题**：三个 GUI 步骤都带 `continue-on-error: true`，且命令后跟 `|| echo "... skipping"`，
+所以 tauri build 失败被吞成 step success。artifact 里只有 CLI，**没有能装的 dmg/exe/deb**——
+如果照这个包去做双机验证，会完全无功而返。这正是"未经验证就升版"的同型问题：绿灯不代表可用。
+
+**修复**：
+- `tauri.conf.json`: `infoPlist` 改为字符串 `"Info.plist"`；
+- 新增 `ui/src-tauri/Info.plist`（含 `NSScreenCaptureUsageDescription`），Tauri 自动合并进生成的 Info.plist；
+- `test-build.yml`: macOS/Windows GUI 步骤去掉 `continue-on-error` 与 `|| skipping`，改为失败即红，
+  并在末尾断言 `.dmg` / `.exe` 产物存在；Linux 保留 best-effort（双机主控是 macOS/Windows）。
+
+**验证纪律**：测试包 run 必须同时满足 ①三 job success ②artifact 内含 GUI 安装包，才算通过。
+只看 job 绿灯不算数——这是血的教训。
+
+**仍未解决（需用户决策）**：`release.yml` 三平台 GUI 步骤同样是 `continue-on-error: true`，
+且共用同一个 `tauri.conf.json`。虽然本次 plist 格式已修，但正式版仍可能在 GUI 打包失败时
+"成功发布却无 GUI 包"。是否把正式版也改硬门禁，涉及发布策略变更，等用户决定。
