@@ -254,3 +254,62 @@ LAN_DESK_DEVICE='<设备码或设备名>' LAN_DESK_PASSWORD='<密码>' \
 
 **回归验证**：`npm run verify:diag`（诊断包 9 项断言）、`cargo test -p controller`（判定 7 项）、
 `bash -n vbox-smoke.sh` + `--no-start` 实跑、`cargo clippy --workspace -D warnings` 全绿。
+
+---
+
+## 9. 画面获取实测：找到问题 2/5 的真正根因（2026-11-24）
+
+### 9.1 用户追问「能不能获取到画面」——诚实结论
+
+前面所有验证是**纯逻辑层**（单测/断言/CLI 输出），从未做过真实采屏 → 编码 → QUIC → 解码出画面。
+本节补做分层实测，结论：
+
+| 层 | 验证方式 | 结果 |
+|---|---|---|
+| 一键连接握手（密码门禁 + ECDH） | `cargo test -p landesk-core --test oneclick` | ✅ 4/4 通过 |
+| 合成源 → 编码 → 真 QUIC Datagram → 还原 | `cargo test -p landesk-core --test dataface` | ✅ 2/2 通过 |
+| 真截屏 → 真编码 → 解码（X11/ffmpeg） | `cargo test -p landesk-core --test real_dataface` | ⏭ macOS 无 DISPLAY，自动 skip |
+| **本机真实采屏抓帧** | `cargo test -p capture --test platform_screenshots -- --ignored --nocapture` | ❌ **失败** |
+
+失败原文（显示器枚举成功：1680×1050 与 1920×1080 两块）：
+```
+抓一帧: BackendUnavailable("CGDisplayCreateImageForRect returned null (screen recording permission?)")
+```
+
+**链路是通的，问题在画面源**：采屏 API 直接返回 NULL，没有像素可编码。这就是问题 2/5 的根因——
+不是 QUIC/编码/前端解码的 bug，而是 macOS 屏幕录制权限没拿到。
+
+### 9.2 真正的代码缺陷：打包配置漏了权限声明
+
+查 `ui/src-tauri/tauri.conf.json`：`bundle` 下**完全没有 macOS 权限声明**。
+没有 `NSScreenCaptureUsageDescription`，macOS 在 app 首次调用 `CGDisplayCreateImageForRect`
+时**不会弹授权窗**——用户根本不知道要去授权，于是永远 NULL → 降级合成源 → 红块测试图。
+现状不是"用户忘了授权"，是**产品从未向用户请求过授权**。
+
+修复（已落地）：
+
+```json
+"bundle": {
+  "macOS": {
+    "infoPlist": {
+      "NSScreenCaptureUsageDescription": "LanDesk 需要屏幕录制权限，才能在被控端把真实桌面画面共享给控制端。请在系统设置 → 隐私与安全性 → 屏幕录制 中允许。"
+    }
+  }
+}
+```
+
+Tauri 2 路径经官方 schema 确认：`bundle.macOS.infoPlist` 为任意 plist key 容器（值 string）。
+
+### 9.3 验证与用户侧操作
+
+- 打包后首次启动受控服务应弹系统授权窗；授权后重新抓帧应拿到非黑 BGRA 帧。
+- 真机复核命令（需在**已授权屏幕录制**的终端/app 上下文运行）：
+  `cargo test -p capture --test platform_screenshots -- --ignored --nocapture`
+- **已安装的旧版本**（v0.5.5 及更早）没有此声明，需手动到
+  系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 LanDesk → **重启应用**。
+- 前端降级 banner 文案已正确引导（reason=0 明确提示去开屏幕录制权限），无需再改。
+
+### 9.4 对发布纪律的影响
+
+本修复**必须**随下个版本打包验证：只合代码不重新打包 = 用户装的还是没权限声明的旧包，
+问题依旧。promote 正式版前须在真机确认「首次启动弹授权窗 + 授权后画面非测试图」两项。

@@ -43,6 +43,11 @@
         "installMode": "currentUser"
       }
     },
+    "macOS": {
+      "infoPlist": {
+        "NSScreenCaptureUsageDescription": "LanDesk 需要屏幕录制权限，才能在被控端把真实桌面画面共享给控制端。请在系统设置 → 隐私与安全性 → 屏幕录制 中允许。"
+      }
+    },
     "linux": {
       "deb": {
         "postInstallScript": "scripts/deb-postinst.sh",
