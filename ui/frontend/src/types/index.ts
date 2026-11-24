@@ -140,6 +140,8 @@ export interface VideoFrameMsg {
   nalu: string
   /** 是否 IDR 关键帧（前端据此 flush 解码器 + 起帧）。 */
   isIdr: boolean
+  /** 受控端采集降级 reason（0=无屏幕录制权限 / 1=锁屏黑帧；undefined=真实画面）。 */
+  captureDegraded?: number
 }
 
 /** 日志级别 */

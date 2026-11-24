@@ -1,0 +1,386 @@
+# LanDesk 测试包构建（双机真机验证专用，不发布）
+#
+# 与 release.yml 的本质区别：
+#   - release.yml：推 v* tag → 建 GitHub Release（prerelease:false）→ 合 main（正式发布）
+#   - 本工作流：workflow_dispatch 手动触发 → 只产出 GUI 安装包 + CLI → 上传 Actions artifact
+#     绝不建 Release、绝不打 tag、绝不改 main/dev。制品 14 天过期，下载后进双机验证。
+#
+# 版本注入：从 tauri.conf.json 读基线版本（如 0.5.0），注入 -test.<run_number> 后缀
+#   → 前端「关于」页 / 诊断包显示 0.5.0-test.N，与正式版一眼可分；
+#   文件名同样带 test.N，避免和正式包混淆。无需改仓库里任何版本文件。
+#
+# 打包逻辑逐字复用 release.yml（含 vendor LF 自愈 / 摘两层 config 在线拉 tauri /
+#   MSVC PATH 前置等所有历史踩坑修复），仅删除 CLI 之外的发布聚合步骤。
+#
+# 触发：Actions 页 → 选本工作流 → "Use workflow from" 选目标分支（如 feature/diagnostic-verification）→ Run
+#   产物在该 run 页面底部 Artifacts 下载，装到 macOS / Windows 双机做真机验证。
+
+name: Test Build（双机验证测试包）
+
+on:
+  # push 到 test-build/** 专用分支即构建。GitHub 限制 workflow_dispatch/repository_dispatch
+  # 只能触发默认分支(main)上的工作流文件；push 事件则会读取被推送分支自身的工作流定义，
+  # 这是本工作流尚未合入 main 前唯一可靠的触发方式。test-build/** 是纯触发分支，可反复覆盖。
+  push:
+    branches:
+      - 'test-build/**'
+  # 合入默认分支后可在 Actions UI 手动触发并选 ref。
+  workflow_dispatch:
+
+permissions:
+  contents: read # 只读代码，不写 Release / tag / 分支
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: false # 不取消在跑的构建，避免测试包半途而废
+
+jobs:
+  # ------------------------------------------------------------------
+  # macOS（arm64 runner）：GUI .dmg/.app（x86_64 + arm64）+ CLI
+  # ------------------------------------------------------------------
+  macos:
+    name: test build (macos, arm64 + x86_64)
+    runs-on: macos-latest
+    steps:
+      - name: Force LF checkout
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          git config core.eol lf
+          rm -rf vendor/ || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] || { echo "vendor self-heal FAILED" >&2; exit 1; }
+          echo "vendor self-healed"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add Apple targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: 注入测试版本号（0.5.0-test.N）
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
+          VER="${BASE}-test.${{ github.run_number }}"
+          python3 - "${VER}" <<'PY'
+          import json, sys
+          p = "ui/src-tauri/tauri.conf.json"
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
+          d["version"] = sys.argv[1]
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          print("injected version:", d["version"])
+          PY
+          echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
+          echo "BASE_VERSION=${BASE}" >> "$GITHUB_ENV"
+
+      - name: Build CLI (x86_64 + arm64)
+        run: |
+          set -euo pipefail
+          for t in x86_64-apple-darwin aarch64-apple-darwin; do
+            arch="${t%%-*}"
+            echo "== CLI ${arch}"
+            cargo build --release --locked \
+              -p controlled -p controller -p relay-server -p signaling-server \
+              --target "${t}"
+            mkdir -p "dist/macos/cli-${arch}"
+            for b in controlled controller relay-server signaling-server; do
+              cp "target/${t}/release/${b}" "dist/macos/cli-${arch}/${b}"
+            done
+            ( cd "dist/macos" && zip -qr "landesk-${PKG_VERSION}-macos-${arch}.zip" "cli-${arch}" )
+          done
+          ls -1 "dist/macos"/*.zip
+
+      # 测试包是双机验证的唯一来源：GUI 打包失败必须让 job 红，禁止 best-effort 假绿灯。
+      - name: GUI installer (.dmg/.app, 硬门禁)
+        shell: bash
+        run: |
+          set -eu
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          for t in x86_64-apple-darwin aarch64-apple-darwin; do
+            arch="${t%%-*}"
+            echo "== GUI dmg/app ${arch}"
+            ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build \
+                --features tauri --target "${t}" )
+            B="ui/src-tauri/target/${t}/release/bundle"
+            mkdir -p "${WS}/dist/macos/gui"
+            find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
+              cp -f "$d" "${WS}/dist/macos/gui/landesk-${PKG_VERSION}-gui-macos-${arch}.dmg"
+            done
+            APP=$(find "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)
+            if [[ -n "${APP:-}" ]]; then
+              APPDIR="$(cd "$(dirname "$APP")" && pwd)"
+              ( cd "${APPDIR}" && zip -qr "landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
+              mv -f "${APPDIR}/landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
+            fi
+            [[ -f "${WS}/dist/macos/gui/landesk-${PKG_VERSION}-gui-macos-${arch}.dmg" ]] \
+              || { echo "::error::未产出 ${arch} .dmg，测试包无 GUI 不可用"; exit 1; }
+          done
+          echo "GUI artifacts: $(ls -1 "${WS}/dist/macos/gui" 2>/dev/null | tr '\n' ' ')"
+
+      - name: 写测试包说明
+        shell: bash
+        run: |
+          mkdir -p dist/macos
+          cat > dist/macos/README-测试包.txt <<EOF
+          LanDesk 测试包 ${PKG_VERSION}（macOS）
+          来源分支: ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}
+          构建: workflow_dispatch #${{ github.run_number }}
+          警告: 这是未签名/未公证测试包，非正式 Release。
+            - 首次打开 dmg 内 app：右键 → 打开（或 系统设置→隐私→「仍要打开」）
+            - 被控端首次采屏会弹「屏幕录制权限」授权窗，务必允许并重启应用
+          双机验证步骤见 docs/test-build-guide.md
+          EOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-macos-${{ github.run_number }}
+          path: dist/macos/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Windows x86_64：GUI NSIS .exe + CLI
+  # ------------------------------------------------------------------
+  windows:
+    name: test build (windows-x86_64)
+    runs-on: windows-latest
+    steps:
+      - name: Force LF checkout
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          git config core.eol lf
+          rm -rf vendor/ || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] || { echo "vendor self-heal FAILED" >&2; exit 1; }
+          echo "vendor self-healed"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: 注入测试版本号
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
+          VER="${BASE}-test.${{ github.run_number }}"
+          python3 - "${VER}" <<'PY'
+          import json, sys
+          p = "ui/src-tauri/tauri.conf.json"
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
+          d["version"] = sys.argv[1]
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          print("injected version:", d["version"])
+          PY
+          echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
+
+      - name: Build CLI (x86_64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${VCToolsInstallDir:-}" ]; then
+            export PATH="$(cygpath -u "${VCToolsInstallDir}bin/Hostx64/x64"):$PATH"
+          fi
+          cargo build --release --locked \
+            -p controlled -p controller -p relay-server -p signaling-server
+          mkdir -p dist/windows/cli
+          for b in controlled controller relay-server signaling-server; do
+            cp "target/release/${b}.exe" "dist/windows/cli/${b}.exe"
+          done
+          ( cd dist/windows && tar -a -c -f "landesk-${PKG_VERSION}-windows-x86_64.zip" cli )
+          ls -1 dist/windows/*.zip
+
+      # 测试包是双机验证的唯一来源：GUI 打包失败必须让 job 红，禁止 best-effort 假绿灯。
+      - name: GUI installer (NSIS .exe, 硬门禁)
+        shell: bash
+        run: |
+          set -eu
+          if [ -n "${VCToolsInstallDir:-}" ]; then
+            export PATH="$(cygpath -u "${VCToolsInstallDir}bin/Hostx64/x64"):$PATH"
+          fi
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri )
+          B="ui/src-tauri/target/release/bundle/nsis"
+          mkdir -p dist/windows/gui
+          find "$B" -maxdepth 1 -name '*.exe' 2>/dev/null | while read -r e; do
+            cp -f "$e" "dist/windows/gui/landesk-${PKG_VERSION}-gui-windows-x86_64-setup.exe"
+          done
+          [[ -f "dist/windows/gui/landesk-${PKG_VERSION}-gui-windows-x86_64-setup.exe" ]] \
+            || { echo "::error::未产出 NSIS .exe，测试包无 GUI 不可用"; exit 1; }
+          echo "GUI NSIS: $(ls -1 dist/windows/gui 2>/dev/null | tr '\n' ' ')"
+
+      - name: 写测试包说明
+        shell: bash
+        run: |
+          mkdir -p dist/windows
+          cat > dist/windows/README-测试包.txt <<EOF
+          LanDesk 测试包 ${PKG_VERSION}（Windows x86_64）
+          来源分支: ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}
+          构建: workflow_dispatch #${{ github.run_number }}
+          警告: 未签名测试包，SmartScreen 选「更多信息 → 仍要运行」。
+          双机验证步骤见 docs/test-build-guide.md
+          EOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-windows-${{ github.run_number }}
+          path: dist/windows/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Linux x86_64：GUI .deb + CLI（双机验证非必需，best-effort）
+  # ------------------------------------------------------------------
+  linux:
+    name: test build (linux-x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force LF checkout
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: 还原 vendor/ 到 LF blob 字节
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config core.autocrlf false
+          git config core.eol lf
+          rm -rf vendor/ || { echo "vendor/ rm failed" >&2; exit 1; }
+          git checkout -f HEAD -- vendor/ || { echo "vendor/ re-checkout failed" >&2; exit 1; }
+          probe="vendor/strsim-0.11.1/tests/lib.rs"
+          want="$(git cat-file blob "HEAD:${probe}" | python3 -c 'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+          got="$(python3 -c 'import sys,hashlib;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${probe}")"
+          [[ "${want}" == "${got}" ]] || { echo "vendor self-heal FAILED" >&2; exit 1; }
+          echo "vendor self-healed"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install libX11 headers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev
+
+      - name: 注入测试版本号
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
+          VER="${BASE}-test.${{ github.run_number }}"
+          python3 - "${VER}" <<'PY'
+          import json, sys
+          p = "ui/src-tauri/tauri.conf.json"
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
+          d["version"] = sys.argv[1]
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          print("injected version:", d["version"])
+          PY
+          echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
+
+      - name: Build CLI (x86_64)
+        run: |
+          set -euo pipefail
+          cargo build --release --locked \
+            -p controlled -p controller -p relay-server -p signaling-server
+          mkdir -p dist/linux/cli
+          for b in controlled controller relay-server signaling-server; do
+            cp "target/release/${b}" "dist/linux/cli/${b}"
+          done
+          ( cd dist/linux && zip -qr "landesk-${PKG_VERSION}-linux-x86_64.zip" cli )
+          ls -1 dist/linux/*.zip
+
+      # 双机验证主控在 macOS/Windows；Linux GUI 保持 best-effort（缺系统库不阻塞验证）。
+      - name: GUI installer (.deb, best-effort)
+        continue-on-error: true
+        run: |
+          set -u
+          sudo apt-get update -qq && sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libxdo-dev pkg-config file libfuse2 \
+            || echo "apt install failed, GUI likely skipped"
+          WS="${GITHUB_WORKSPACE}"
+          CFG="${WS}/ui/src-tauri/.cargo/config.toml"
+          BAK="${CFG}.bak"
+          ROOT_CFG="${WS}/.cargo/config.toml"
+          ROOT_BAK="${ROOT_CFG}.bak"
+          mv "${CFG}" "${BAK}" 2>/dev/null || true
+          mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
+          trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
+          ( cd ui/frontend && npm ci && npm run build )
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
+            || echo "GUI build failed, skipping"
+          mkdir -p dist/linux/gui
+          BD="ui/src-tauri/target/release/bundle/deb"
+          if [[ -d "$BD" ]]; then
+            find "$BD" -maxdepth 1 -name '*.deb' 2>/dev/null | while read -r d; do
+              cp -f "$d" "dist/linux/gui/landesk-${PKG_VERSION}-gui-linux-x86_64.deb"
+            done
+          fi
+          echo "GUI deb: $(ls -1 dist/linux/gui 2>/dev/null | tr '\n' ' ')"
+
+      - name: 写测试包说明
+        shell: bash
+        run: |
+          mkdir -p dist/linux
+          cat > dist/linux/README-测试包.txt <<EOF
+          LanDesk 测试包 ${PKG_VERSION}（Linux x86_64）
+          来源分支: ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}
+          双机验证步骤见 docs/test-build-guide.md
+          EOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-linux-${{ github.run_number }}
+          path: dist/linux/
+          if-no-files-found: warn
+          retention-days: 14

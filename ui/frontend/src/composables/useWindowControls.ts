@@ -9,6 +9,17 @@ import { landesk, isDesktopHost } from '../lib/landesk'
 
 export type Platform = 'macos' | 'windows' | 'linux'
 
+/** 同步判定宿主平台，用于首帧渲染即确定顶栏布局（避免异步 platform() 返回前的布局跳动）。
+ *  Tauri macOS WebView 的 UA 含 Macintosh，与后端 window_platform 结果一致；同步结果随后由 settle() 校正。 */
+function detectPlatformSync(): Platform {
+  if (typeof navigator === 'undefined') return 'linux'
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? ''
+  const s = `${navigator.userAgent} ${uaData} ${navigator.platform}`.toLowerCase()
+  if (s.includes('mac') || s.includes('darwin')) return 'macos'
+  if (s.includes('win')) return 'windows'
+  return 'linux'
+}
+
 /** 窗口控制 composable（模块级惰性判定，避免每处顶栏各发一次平台查询）。 */
 export function useWindowControls(): {
   isDesktop: Ref<boolean>
@@ -21,7 +32,8 @@ export function useWindowControls(): {
   onClose: () => void
 } {
   const isDesktop = ref(isDesktopHost())
-  const platform = ref<Platform>('linux')
+  // 首帧即用同步判定定布局（macOS 红绿灯留白立即生效），异步结果仅作校正。
+  const platform = ref<Platform>(detectPlatformSync())
   let settled = false
   async function settle(): Promise<void> {
     if (settled) return

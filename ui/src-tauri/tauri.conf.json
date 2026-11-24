@@ -43,6 +43,9 @@
         "installMode": "currentUser"
       }
     },
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "linux": {
       "deb": {
         "postInstallScript": "scripts/deb-postinst.sh",

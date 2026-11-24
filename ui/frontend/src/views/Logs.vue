@@ -4,10 +4,14 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { toast } from '../composables/useUi'
 import { useLanDesk } from '../composables/useLanDesk'
+import { landesk } from '../lib/landesk'
+import {
+  buildDiagnosticReport, downloadReport, diagnosticFilename, type DiagnosticsInput,
+} from '../lib/diagnostics'
 import type { LogFilter } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 
-const { isLive, logs, loadLogs, clearLogs } = useLanDesk()
+const { isLive, logs, loadLogs, clearLogs, local, controlled, config } = useLanDesk()
 const level = ref<LogFilter>('ALL')
 const keyword = ref('')
 const autoScroll = ref(true)
@@ -28,7 +32,42 @@ const filtered = computed(() => {
 })
 // 清空：live 调后端 logClear（环形缓冲归零）并同步本地；非 live 仅清本地。
 async function clear() { await clearLogs(); toast('日志已清空', 'info') }
-function exportLog() { toast('已导出 landsdk.log', 'success') }
+
+// 导出诊断包（真）：平台/本机/受控/配置快照 + 全部原始日志 → 文本，Blob 下载。
+// 用 logQuery('ALL','') 拿原始行（epoch 微秒），而非已格式化的 logs ref——证据需绝对时间。
+const exporting = ref(false)
+async function exportLog() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const live = isLive.value
+    let raw: DiagnosticsInput['logs'] = []
+    if (live) {
+      try { raw = await landesk.logQuery('ALL', '') }
+      catch { raw = [] }
+    }
+    let platform = 'unknown'
+    try { platform = await landesk.platform() } catch { /* 保留 unknown */ }
+    const input: DiagnosticsInput = {
+      platform,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      generatedAt: new Date().toISOString(),
+      local: live ? local : null,
+      controlled: live ? controlled : null,
+      config: live ? config : null,
+      logs: raw,
+      preview: !live,
+    }
+    const text = buildDiagnosticReport(input)
+    const filename = diagnosticFilename()
+    downloadReport(text, filename)
+    toast(`已导出 ${filename}`, 'success')
+  } catch (e) {
+    toast(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
+  } finally {
+    exporting.value = false
+  }
+}
 
 // 拉取日志：live 走后端环形缓冲，非 live 保留 mock。
 onMounted(() => { loadLogs(level.value, keyword.value || undefined) })
@@ -57,7 +96,7 @@ watch([level, keyword], () => { if (isLive.value) loadLogs(level.value, keyword.
         </div>
         <span class="ld-switch-label"><button class="ll-switch" :data-on="autoScroll" @click="autoScroll = !autoScroll" /> 自动滚动</span>
         <div style="flex:1" />
-        <button class="ll-btn ll-btn--default" @click="exportLog"><Icon name="download" :size="14" /> 导出 log</button>
+        <button class="ll-btn ll-btn--default" :disabled="exporting" @click="exportLog"><Icon name="download" :size="14" /> {{ exporting ? '导出中…' : '导出诊断包' }}</button>
         <button class="ll-btn ll-btn--danger-outline" @click="clear"><Icon name="trash" :size="14" /> 清空</button>
       </div>
       <div class="ld-log-filters" style="margin-top:12px">

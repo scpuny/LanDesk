@@ -388,6 +388,11 @@ version = "0.2.0"
 dependencies = [
  "clap",
  "landesk-core",
+ "lp",
+ "mdns",
+ "quic-link",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

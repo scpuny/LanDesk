@@ -1,0 +1,315 @@
+# 会话五问题修复落地方案（顶栏 / 画面 / 重连 / 防火墙 / 跨平台黑屏）
+
+> 目标：修复用户 v0.5.5 实测的五个运行期问题。用户决策（2026-11-23）：先出方案、确认后再写代码；画面问题聚焦「红块/条纹是合成测试图，要看真实桌面」。
+>
+> 现状版本：main `3a24524`（v0.5.5）。本方案基于该版本，工作区干净。
+
+## 0. 五问题一览与结论
+
+| # | 用户现象 | 根因 | 修复层面 |
+|---|---|---|---|
+| 1 | macOS 会话窗左侧红绿灯把右侧工具顶出边界 | `isMac` 异步判定 + 顶栏 flex 无收缩策略 | 前端 CSS + 平台判定同步化 |
+| 2 | Windows 连 macOS 画面是「灰条纹 + 红方块」测试图 | **macOS 被控端采屏失败悄悄降级为合成源**，用户看的是 `SynthCapture` 测试图，不是桌面 | 被控端采屏降级检测 + 明示提示 |
+| 3 | 关闭会话窗后再连接，打开窗体显示「选择设备」白屏 | 重开时 `session_launch` 为空 / 目标丢失，`SessionApp` 未拿到 target | 后端保留上次目标 + 前端守卫 |
+| 4 | macOS 防火墙打开后，Windows 连不上 macOS | QUIC 受控端监听 `0.0.0.0:52000`，被 macOS 应用防火墙拦入站（无授权提示/例外引导） | 防火墙检测 + 用户引导 / 端口策略 |
+| 5 | macOS 连 Windows 一片黑 | Windows GDI `BitBlt` 在锁屏/无交互会话下返回 Ok(全黑帧)，被控端无黑帧检测→把黑帧编码发出；控制端解出黑画面（与问题 2 同源但表现不同：macOS 未授权降级合成图，Windows 抓黑帧不降级） | 同问题 2 层 1：黑帧检测 + 降级/提示 |
+
+关键判断（问题 2）：状态栏的 `18ms / 丢包 0% / 4.2Mbps / 重置 ×0` **是前端演示默认值，不是真实码流**。后端定义了 `EncoderChanged/LatencyMs/LossPct/BitrateKbps/EncoderReset` 事件（`crates/ui/src/events.rs`），但 `SessionManager` 只 apply 了 `StateChanged/ConnModeChanged`（`manager.rs:247-248`），这些指标从未写入状态。真实有效数据只有 `8fps / 0KB/s`——8 帧/秒要 round 成 0KB/s，需每帧 NALU < 64 字节，真实桌面 H.264 不可能这么小，**只有近乎纯色的合成/黑帧才会这样**。第二张截图的红方块条纹底正是 `SynthCapture` 的固定测试图案（`crates/capture/src/lib.rs:228`「红色块水平移动 + 左上角烧录 seq」）。
+
+证据链完整：传输链路（分片/重组/解码）本身是自洽的，问题在被控端画面源，不在 QUIC 或 WebCodecs。
+
+---
+
+## 1. 问题 1：macOS 顶栏布局
+
+### 1.1 现状证据
+- 会话窗在 macOS 用 `decorations:true + titleBarStyle:Overlay + hiddenTitle`（`ui/src-tauri/src/lib.rs:428-434`），保留原生红绿灯；Win/Linux 用 `decorations:false` 自绘三键。
+- 前端靠 `isMac` 加 `.ld-sess-top--mac { padding-left: 80px }` 避让（`app.css:363`），`isMac` 来自 `useWindowControls()`。
+- **缺陷 A（根因）**：`isMac` 由 `landesk.platform()` **异步**解析，ref 初值恒为 `'linux'`（`useWindowControls.ts:20`）。首帧按无红绿灯布局渲染，平台返回后补 80px 留白→布局跳动；若窗口恰好较窄，右侧工具首次即被挤出。
+- **缺陷 B（放大）**：顶栏 `.ld-sess-top` 是 `display:flex; gap`，子项无 `min-width:0 / flex-shrink`，目标名变长（如 `DESKTOP-A4FPIPS` + `内网直连` + 分辨率）时，右侧 tools 无收缩空间被顶出边界。
+
+### 1.2 改动点
+**前端 `ui/frontend/src/composables/useWindowControls.ts`**
+- 平台判定同步化：在模块加载时同步读一次宿主平台。Tauri 桌面轨用编译期常量注入（在 `vite.config` define `__PLATFORM__`）或壳启动时随首帧下发；最小改动方案——用 `navigator.userAgent` 同步判定 macOS（`Macintosh`），桌面 Tauri 的 WebView UA 同样含该标记，浏览器预览亦准确；`landesk.platform()` 异步结果仅作二次校正。
+
+**前端 `ui/frontend/src/styles/app.css`**
+- `.ld-sess-top` 增强溢出收缩：中间 `.ld-sess-target { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }`，`.ld-sess-tools { flex: none }`，`.ld-sess-state { flex: none }`。
+- macOS 留白从固定 80px 改为 token 变量 `--ld-titlebar-traffic-w: 80px`，`.ld-sess-top--mac { padding-left: var(--ld-titlebar-traffic-w) }`，便于统一调整。
+- 加窄窗 media query（窗口可缩到 720px）：≤900px 时隐藏分辨率标签或缩短目标名。
+
+### 1.3 验证
+- 本地 `npm run typecheck` + `vite build`；
+- 三平台窗口各开会话窗截图核对：macOS 红绿灯不与「运行中」重叠、右侧「断开连接」完整可见；Win/Linux 自绘三键不被挤出；窗口缩到最小宽 720px 不溢出。
+
+---
+
+## 2. 问题 2：画面是合成测试图（核心）
+
+### 2.1 现状证据
+- `VideoPump::new_platform()`（`video_pump.rs:100-133`）：`platform_capture()` / `monitors()` 任一返回 `Err` 即 `fallback()` 用 `SynthCapture`。
+- `VideoPump::next_frame()`（`video_pump.rs:174-190`）：采屏 `grab()` 仅在返回 `Err` 时降级合成源；**无「画面内容为黑/纯色」的校验**。
+- 平台捕获器的权限失败表现：
+  - macOS `CGDisplayCapture::new()`（`platform_macos.rs:53+`）：未授「屏幕录制」时 `CGDisplayCreateImageForRect` 返回 NULL 或全黑。构造期探测若只查显示器枚举而未逐像素校验，**全黑图会被当成成功**（`platform_macos.rs` 顶部注释明确「返回全黑或 NULL」）。
+  - Windows `GdiCapture::grab()`（`platform_windows.rs:37-95`）：`BitBlt` 成功但锁屏/安全桌面/无交互会话下像素全黑，`grab()` 返回 `Ok(全黑帧)`，不触发任何降级。
+- `SynthCapture`（`capture/src/lib.rs:196-273`）：产红方块 + 灰条纹 + seq 测试图。用户看到的正是它。
+- **没有任何信号把「已降级合成源」告知控制端**：`VideoFrameMsg`（`video.rs:57`）只有 seq/kind/flags/nalu/is_idr，无画面源字段；状态栏指标是演示默认值。故用户完全不知道自己看的是测试图。
+
+### 2.2 修复策略（三层，按优先级）
+
+#### 层 1：采屏端识别「黑/无效帧」并降级 + 上报状态
+**`crates/capture/src/lib.rs`**
+- 新增 `FrameQuality` 判定工具：`fn is_blank_frame(frame: &RawFrame) -> bool`——采样 Y 通道（BGRA 每 4 字节取 1），计算像素方差 / 非背景色占比；连续 N 帧（如 15 帧 ≈ 0.5s）近纯色视为无效。
+- 对 `SynthCapture` 之外的真实采屏器统一启用（Windows GDI、macOS CGDisplay、Linux X11）。
+
+**`crates/landesk-core/src/video_pump.rs`**
+- `next_frame()` 采到帧后先跑 `is_blank_frame` 判定：
+  - 连续黑帧达阈值 → 切换到 `SynthCapture`（保证会话不中断），并置 `self.degraded = true`、记录 `degraded_reason`（`NoPermission` / `BlankFrame` / `NoDisplay`）。
+  - 降级后每 5s 重试一次真实采屏；恢复成功则切回并清 degraded。
+- `VideoPump` 增 `is_degraded() -> bool` 与 `degraded_reason()` 供宿主读取。
+
+#### 层 2：把「降级」明示给控制端用户
+**后端事件**（`crates/ui/src/events.rs` 增 `CaptureDegraded { reason }`，`manager.rs` apply 进 `SessionStatusView` 新字段 `captureDegraded`）——因为受控端与控制端是两个独立进程，降级状态必须经 QUIC 控制通道传过来。
+
+链路：`ControlledHost` 的采屏泵检测降级 → 经控制流发 `CaptureDegraded` 帧（`ControlMsg` 增变体）→ 控制端 `SessionManager` 收帧 → 写入 `SessionStatusView.captureDegraded` → 前端状态快照读取。
+
+> 约束：新增 `ControlMsg` 变体需协议兼容（旧端忽略未知变体）。若嫌协议改动大，可用现有 `EncoderReset` 事件复用为通用告警（但语义不清），本方案选前者。
+
+**前端 `Session.vue`**：`watch(liveSession)` 里读 `captureDegraded`，在画面上叠一条醒目 banner：
+「对方屏幕未能采集（可能未授予屏幕录制权限），当前显示测试画面。请在被控端系统设置中给 LanDesk 授权后重试。」
+并在状态栏把假的码率/延迟指标改为「—」或在真实事件接通前显示为「实测值待接入」，避免误导。
+
+#### 层 3：状态栏指标接真（顺带修复误导）
+**`crates/ui/src/manager.rs`**：apply `EncoderChanged/LatencyMs/LossPct/BitrateKbps/EncoderReset` 事件到状态字段（受控端需经控制通道发这些指标，同样走层 2 的通道）。若本次范围不含受控端指标上报，则**前端在 live 态不显示演示默认值**（`?? state.metrics.xxx` 改为仅在非 live 演示态显示），live 态显示「—」。
+
+### 2.3 权限引导（治本，需产品确认）
+- macOS：首次启动受控服务时检测 `CGWindowListCreateImage` 是否可用；不可用则弹引导，打开系统设置 → 隐私与安全性 → 屏幕录制。
+- Windows：检测会话是否交互（如 `GetProcessWindowStation` / WTS 查询），非交互会话明确提示「当前为非交互桌面，无法采集屏幕」。
+- 此项涉及系统设置跳转与权限检测，工作量较大；**本方案先做层 1+2（检测 + 明示），层 3 权限引导列为后续**。
+
+### 2.4 验证
+- 单测：`is_blank_frame` 对纯黑/纯色/合成图/真实图各给正确判定（用 `capture` crate 的 RawFrame 构造，无 OS 依赖）。
+- 集成：无屏幕录制权限的 macOS 起受控 → 控制端应显示降级 banner，而非让用户误以为是真桌面。
+- 正常授权环境：采真桌面 → 无 banner、画面为真实内容、8fps 不再伴随 0KB/s。
+
+---
+
+## 3. 问题 3：关闭后重连显示「选择设备」
+
+### 3.1 现状证据
+- 关闭：`session_window_close_confirmed`（`ui/src-tauri/src/lib.rs:484`）只置 `session_allow_close=true` 并关窗，**未清 `session_launch`**。
+- 重开：主窗 `launchSession(target)`（`useSessionWindow.ts:52`）→ `landesk.sessionWindowOpen(target, path)` → 后端 `session_window_open`（`lib.rs:406`）写 `session_launch=Some(payload)` → 因窗已关，走 `WebviewWindowBuilder` 新建 → 前端 `SessionApp.onMounted` 读 `readSessionLaunch()` → `startSession(target, 'await-auth')`。这条路径 target 应能带到。
+- **缺陷**：`Session.vue` 的 `watch(liveSession)` 有 idle 空快照守卫（`Session.vue:506-507`），重开时后端 `status_view()` 是 idle+null target，守卫 return——**保留了前端 target**。看似正确。
+- 实际复现显示「选择设备」白屏（`Session.vue:724` idle 且无 target 的分支），说明 `state.sessionTarget` 为 null。可能路径：
+  - (a) 重连是从会话窗内部「去选择设备」→ 主窗未重新 `launchSession`，而是复用旧 session 窗（已关）失败；
+  - (b) `session_launch` 在关窗时被 Tauri 销毁窗口的某清理逻辑置空（当前代码未见，但需复核运行态）；
+  - (c) `SessionApp.onMounted` 的 `readSessionLaunch()` 与 `Session.vue.onMounted` 的 `loadSessionStatus()` 竞态：后者拿 idle+null，前者尚未 resolve，`startSession` 后又被 `loadSessionStatus` 的 `apply` 覆盖——但守卫应挡住；除非 `snap.target` 非 null 而 `state.sessionTarget` 被置为别的空值。
+
+### 3.2 修复策略（稳妥、不依赖精确复现）
+1. **关闭时显式保留「上次目标」**：`AppState` 增 `last_session_launch: Mutex<Option<SessionLaunchPayload>>`，`session_window_open` 每次写入时同步更新它；`session_window_close_confirmed` / `window_close` **不清** `session_launch`（现状已如此），确保重开一定能读到。
+2. **前端重连兜底**：`SessionApp.onMounted` 读到 `launch.target` 为 null 时，从 `recentTargets`（localStorage 持久化的最近连接，`useSessionWindow.ts:19`）取最新一条补上，调 `startSession(...,'await-auth')`；这样即便后端 payload 丢失，也回到上次设备的待鉴权页而非「选择设备」。
+3. **消除竞态**：`SessionApp` 把 `startSession` 结果写入一个共享 ref，`Session.vue` 的 status watcher 只在 `state.sessionTarget` 已定时才 apply 后端 target，避免异步顺序覆盖。
+4. **明确语义**：用户关闭会话窗后再从设备列表点连接，走全新 `launchSession`（target 明确），应直接进入待鉴权页——补全一条端到端测试覆盖「关窗→重开→target 保留」。
+
+### 3.3 验证
+- 集成测试：`session_window_open(Some(target))` → 模拟关窗 → 再 `session_window_target()` 返回同一 target。
+- 前端单测：`launch.target=null` + `recentTargets` 有值 → `SessionApp` 回填最新目标、渲染待鉴权页。
+- 手工：连一台设备→关闭窗口→从设备列表重新点连接→应显示「输入对方访问密码」页。
+
+---
+
+## 4. 问题 4：macOS 防火墙打开后 Windows 连不上
+
+### 4.1 现象与根因
+用户实测：macOS 被控端防火墙开启后，Windows 控制端无法连接。QUIC 是 **UDP 入站连接**，受控端监听 `0.0.0.0:52000`（`controlled_host.rs:177-181`），`Controlled::new` 内部经 `quinn::Endpoint::server` 绑定 UDP socket（`server.rs:40-47`）。macOS 应用防火墙（Application Firewall）默认拦截未签名/未授权应用的入站连接；Tauri 打包的 app 首次被入站时系统可能弹授权框，但：
+- 用户可能点了「拒绝」或弹框被忽略；
+- 即便防火墙放行 mDNS（UDP 5353 组播），QUIC 的 52000 入站仍可能被单独拦截——**发现得到设备但连不上**，与用户描述一致。
+
+需区分两类防火墙：应用层防火墙（System Settings → Network → Firewall）与 `pf`/第三方。本方案聚焦前者（最常见）。
+
+### 4.2 修复策略（可选组合，按侵入度递增）
+1. **引导式（推荐先做，零代码风险）**：在设置页「被控服务」区加一段说明 + 检测按钮。检测到防火墙开启且 52000 不可达时，给出明确指引：「系统设置 → 网络 → 防火墙 → 选项 → 添加 LanDesk 并允许传入」。macOS 无公开 API 读应用防火墙状态（`socketfilterfw` 需 root），故用**自检代替状态读取**：受控端起服后用本机 mDNS 地址自连一次 52000，失败即判定可能防火墙拦截。
+2. **端口策略**：若自连失败，提示可关闭「隐身模式」（防火墙「阻止所有传入」）或添加例外；不改代码强行开洞（无签名 app 无法绕过系统防火墙）。
+3. **连接失败信息增强**：控制端 `connect` 超时时，若目标平台为 macOS，错误文案追加「请检查被控端 macOS 防火墙是否放行 LanDesk 的 52000 端口」，帮助用户自助排障。
+
+### 4.3 验证
+- macOS 开启应用防火墙 + 未授权：控制端连接失败并给出防火墙提示；按指引添加例外后连接成功。
+- 单测：自连探测函数对「端口可达 / 不可达」两态返回正确。
+
+---
+
+## 5. 问题 5：macOS 连 Windows 一片黑（与问题 2 同源、表现不同）
+
+### 5.1 现象与根因
+用户实测：macOS 控制端连 Windows 被控端，画面一片黑（而非问题 2 的红块测试图）。两个方向对比：
+
+| 方向 | 被控端采屏表现 | 画面结果 |
+|---|---|---|
+| Windows → macOS | macOS `CGDisplayCreateImageForRect` 无权限 → NULL 或全黑 → `platform_capture()` 构造失败 → 降级 `SynthCapture` | 红块条纹测试图（问题 2） |
+| macOS → Windows | Windows GDI `BitBlt` 在锁屏/安全桌面/RDP 断开/无交互会话下**返回 Ok 但像素全黑**（`platform_windows.rs:37-95`：只检查 `BitBlt`/`GetDIBits` 返回值，`GetDIBits` 后直接 `Ok(frame)`，无像素内容校验） | 黑帧被正常编码发出→控制端解出纯黑（问题 5） |
+
+两者根因同一类：**被控端采屏结果缺乏内容有效性校验**，只是 macOS 走「构造失败→降级合成源」路径、Windows 走「grab 成功但全黑→当正常帧发送」路径，故表现不同。
+
+### 5.2 修复策略
+完全复用问题 2 层 1 的 `is_blank_frame` 检测：
+- `VideoPump::next_frame()` 对 Windows GDI 返回的帧做黑帧判定；连续 N 帧纯黑 → 降级 `SynthCapture`（红块测试图）+ 标记 degraded（这样至少用户能从红块看出是测试图，而不是误以为真桌面黑屏）。
+- 增加 Windows 侧「无交互桌面」检测：`WTSQuerySessionInformation` / `GetProcessWindowStation` 判断当前会话是否交互；非交互则直接在 `new_platform()` 阶段降级合成源并上报原因（`NonInteractiveSession`），避免逐帧黑帧检测的 0.5s 延迟。
+- 层 2 的状态上报与 banner 同样覆盖问题 5，文案区分原因：macOS「屏幕录制权限未授予」/ Windows「当前为非交互桌面或已锁屏」。
+
+### 5.3 验证
+- 单测：`is_blank_frame` 对全黑 RawFrame 返回 true（Windows 路径核心）。
+- 实机：Windows 锁屏状态下起受控 → 控制端看到红块测试图 + 降级 banner，而非纯黑。Windows 正常登录桌面 → 看到真实桌面、无 banner。
+
+---
+
+## 6. 实施分批与提交
+
+| 批次 | 内容 | 提交 | 风险 |
+|---|---|---|---|
+| B1 | 问题 1（顶栏布局）+ 问题 3（重连兜底）：纯前端 + 少量后端状态 | `fix/session-topbar-reconnect` | 低 |
+| B2 | 问题 2/5 层 1+3（采屏黑帧检测降级 + 状态栏假指标处理）：Rust 侧 + 前端展示，覆盖 macOS 与 Windows 两平台 | `fix/capture-degraded-detect` | 中（涉及采屏策略） |
+| B3 | 问题 2/5 层 2（降级状态跨 QUIC 上报 + banner）：新增协议变体 | `fix/capture-degraded-signal` | 中高（协议兼容） |
+| B4 | 问题 4（macOS 防火墙检测 + 引导 + 连接错误文案）：设置页说明 + 自检 + 前端文案 | `fix/macos-firewall-guidance` | 低 |
+
+按用户偏好：每批**本地提交**，不推送、不建 PR、不发版，等用户明确指令再走 Git Flow。
+
+> **实施结果（2026-11-23，分支 `fix/session-five-issues`，6 提交）**：
+> - B3 层 2 实际未采用「新增 ControlMsg 变体」，改为**视频 datagram flags 带内上报**（`FLAG_CAPTURE_DEGRADED`/`FLAG_DEGRADED_REASON`）。原因：控制端 `SessionManager` 无 `recv_control` 循环，且 `send_control`/`recv_control` 均需 `&mut session`——新增接收循环会长期持锁阻塞其他命令，需重构会话拆半，风险高于收益。带内方案与画面天然同步、控制端视频泵任务独立不争锁、零协议兼容成本。
+> - B4 未做自连探测（macOS 无公开 API 读应用防火墙状态，且本机自连成功无法证明外部可入站），改为设置页 + 连接失败页的**引导文案**。
+> - 验证：全量 `cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`、前端 `typecheck` + `vite build` 全通过。
+
+## 7. 待用户确认的决策点
+
+1. **降级提示方式**（问题 2/5）：是否接受「新增控制通道 `CaptureDegraded` 事件 + banner」（B3），还是先只做本地提示（受控端弹窗/日志）以缩小改动？
+2. **状态栏假指标**：live 态是否直接隐藏 `18ms/4.2Mbps` 等演示默认值（改为「—」）？
+3. **权限引导与防火墙**（问题 4 + 2.3）：本期做还是后续单独一期？macOS 应用防火墙无公开 API 读状态，方案采用「自连探测 + 文案引导」，是否接受？
+4. **修复范围**：五个问题分四批全做，还是先做某几批（如先 B2 解决画面黑屏/测试图，其余后续）？
+
+---
+
+## 8. 诊断验证能力（分支 `feature/diagnostic-verification`，用户决策 2026-11-23）
+
+> 用户决策：暂停发布。新建独立分支做"自诊断/自验证"能力；`pre-release` 升级为最后一道诊断关卡，
+> 无未决问题才允许打 tag 发正式版。目的：打破"改代码 → 直接发版 → 装机踩坑 → 再改再发"的循环。
+
+### 8.1 根因判断
+
+这不是"调试能力不足"，是**验证分层缺失**：CI（`cargo test`/`clippy`/`build`）只覆盖纯逻辑，
+而五问题全是运行时/系统级问题（屏幕录制权限、防火墙入站、锁屏黑帧、原生窗口布局），
+CI 无屏幕/无权限/无真实会话，天然覆盖不到 → 每版只能靠装机发现。
+且原 `Logs.vue:exportLog()` 是假导出（仅 toast），出问题拿不到日志证据，只能靠截图猜
+（本次就是从"红块图案"反推出 SynthCapture 降级）。
+
+### 8.2 已落地（6 个本地提交，均未推送）
+
+| 层 | 能力 | 实现 |
+|---|---|---|
+| 可定位 | 诊断包真实导出 | `lib/diagnostics.ts` 组装"环境快照（平台/版本/本机/受控/配置摘要脱敏）+ 可疑事件 + 全部原始日志"，Blob 下载；版本由 vite 从 `tauri.conf.json` 注入，单一来源 |
+| 可定位 | 关键事件落日志 | `SessionManager.poll_video` 检测采集降级码跳变记一条（0=无录屏权限/1=锁屏黑帧，connect/close 复位）；`session_connect` 失败日志带目标 IP:port，便于推断对端防火墙拦 UDP 入站 |
+| 验证前置 | 运行自检页 | 设置页展示本机可测项（受控监听/mDNS/编码能力/版本，实读状态）；对端项（录屏权限/锁屏/防火墙）明确标注"需对端确认"，不造假绿灯 |
+| 验证前置 | headless 驱动命令 | `controller device-list`：mDNS 发现输出 JSON；`controller probe`：连接 + 采样视频数据报，按 IDR/降级 flags 判定画面可用性，输出 PASS/FAIL JSON + 退出码。不解码 H.264、零编解码依赖 |
+| 验证前置 | VBox 双机冒烟脚本 | `scripts/test-e2e/vbox-smoke.sh`：VBoxManage 起停 VM + arp 探活 + **自动调用 device-list/probe**，guest 内目视/键鼠/布局仍需人工打勾（含五问题回归项）；自动项 FAIL 即 exit 1 拦发布 |
+
+### 8.3 使用约束（重要）
+
+- **日志 ring 是内存缓冲（2000 条），进程退出即丢失**。出问题须**当场**到日志中心导出诊断包，
+  重启应用后证据不在。后续若需"崩溃后仍可查"，另做磁盘持久化（本期范围外）。
+- 诊断包只脱敏**访问密码**（标注"已设置/未设置"）；设备码/临时码状态保留（定位会话用），
+  对外发送前请自行确认是否含敏感信息。
+- 自检页只对**本机**状态给红绿灯；对端问题必须按清单在对端 VM/机器上核对。
+
+### 8.4 新发布纪律（pre-release 门禁）
+
+1. `feature/diagnostic-verification` 本地验证通过 → 本地提交（等用户授权才推送/建 PR）。
+2. 合入 `dev` → 切 `pre-release` → CI 全绿 → 跑 `vbox-smoke.sh` + 诊断包抽查。
+3. 冒烟人工项全部打勾、无未决问题 → 才从 pre-release 打 `v*` tag → Release → finalize main。
+4. 任一回归项未过 → 不得 promote 正式版。
+
+### 8.5 自动化判据与回归验证（本轮补强）
+
+**probe 判定优先级**（纯函数 `verdict_for`，7 单测覆盖）：
+
+| 观测 | 判据 | 对应问题 |
+|---|---|---|
+| flags 降级 reason=0 | FAIL `capture_no_permission` | 问题 2（macOS 无录屏权限显示测试图） |
+| flags 降级 reason=1 | FAIL `capture_blank_frame` | 问题 5（Windows 锁屏纯黑） |
+| 采样窗口内 0 视频包 | FAIL `no_video_frames` | 受控服务未起 / 防火墙拦 UDP 入站（问题 4 相关） |
+| 有包但无 IDR（kind 0/1） | FAIL `no_keyframe` | 前端解码器无法出首帧；仅 SPS/PPS 重传不算 |
+| 有 IDR 且无降级 | PASS `ok` | 连接 + 关键帧 + 真实画面链路通 |
+
+> probe 不解码 H.264——只读数据报头（kind/flags/seq）与带内降级标志，因此可在无显示/CI 环境运行。
+> 画面"观感"（真实桌面 vs 测试图）仍须人工目视，自动 PASS 不替代这一项。
+
+**冒烟脚本用法**（凭据走环境变量，避免 `ps` 泄露密码）：
+
+```bash
+cargo build -p controller
+CONTROLLER_BIN=target/debug/controller \
+LAN_DESK_DEVICE='<设备码或设备名>' LAN_DESK_PASSWORD='<密码>' \
+  ./scripts/test-e2e/vbox-smoke.sh --no-start
+```
+
+- 未提供凭据时 probe 明确标注"跳过（不造假绿灯）"，不判定 PASS。
+- 无设备/VM 未起时如实 FAIL 并 `exit 1`（实测：3 项 FAIL，禁止 promote）。
+- 报告落 `scripts/test-e2e/reports/`（已 gitignore，含本机 IP 不入库）。
+
+**回归验证**：`npm run verify:diag`（诊断包 9 项断言）、`cargo test -p controller`（判定 7 项）、
+`bash -n vbox-smoke.sh` + `--no-start` 实跑、`cargo clippy --workspace -D warnings` 全绿。
+
+---
+
+## 9. 画面获取实测：找到问题 2/5 的真正根因（2026-11-24）
+
+### 9.1 用户追问「能不能获取到画面」——诚实结论
+
+前面所有验证是**纯逻辑层**（单测/断言/CLI 输出），从未做过真实采屏 → 编码 → QUIC → 解码出画面。
+本节补做分层实测，结论：
+
+| 层 | 验证方式 | 结果 |
+|---|---|---|
+| 一键连接握手（密码门禁 + ECDH） | `cargo test -p landesk-core --test oneclick` | ✅ 4/4 通过 |
+| 合成源 → 编码 → 真 QUIC Datagram → 还原 | `cargo test -p landesk-core --test dataface` | ✅ 2/2 通过 |
+| 真截屏 → 真编码 → 解码（X11/ffmpeg） | `cargo test -p landesk-core --test real_dataface` | ⏭ macOS 无 DISPLAY，自动 skip |
+| **本机真实采屏抓帧** | `cargo test -p capture --test platform_screenshots -- --ignored --nocapture` | ❌ **失败** |
+
+失败原文（显示器枚举成功：1680×1050 与 1920×1080 两块）：
+```
+抓一帧: BackendUnavailable("CGDisplayCreateImageForRect returned null (screen recording permission?)")
+```
+
+**链路是通的，问题在画面源**：采屏 API 直接返回 NULL，没有像素可编码。这就是问题 2/5 的根因——
+不是 QUIC/编码/前端解码的 bug，而是 macOS 屏幕录制权限没拿到。
+
+### 9.2 真正的代码缺陷：打包配置漏了权限声明
+
+查 `ui/src-tauri/tauri.conf.json`：`bundle` 下**完全没有 macOS 权限声明**。
+没有 `NSScreenCaptureUsageDescription`，macOS 在 app 首次调用 `CGDisplayCreateImageForRect`
+时**不会弹授权窗**——用户根本不知道要去授权，于是永远 NULL → 降级合成源 → 红块测试图。
+现状不是"用户忘了授权"，是**产品从未向用户请求过授权**。
+
+修复（已落地）：
+
+```json
+"bundle": {
+  "macOS": {
+    "infoPlist": {
+      "NSScreenCaptureUsageDescription": "LanDesk 需要屏幕录制权限，才能在被控端把真实桌面画面共享给控制端。请在系统设置 → 隐私与安全性 → 屏幕录制 中允许。"
+    }
+  }
+}
+```
+
+Tauri 2 路径经官方 schema 确认：`bundle.macOS.infoPlist` 为任意 plist key 容器（值 string）。
+
+### 9.3 验证与用户侧操作
+
+- 打包后首次启动受控服务应弹系统授权窗；授权后重新抓帧应拿到非黑 BGRA 帧。
+- 真机复核命令（需在**已授权屏幕录制**的终端/app 上下文运行）：
+  `cargo test -p capture --test platform_screenshots -- --ignored --nocapture`
+- **已安装的旧版本**（v0.5.5 及更早）没有此声明，需手动到
+  系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 LanDesk → **重启应用**。
+- 前端降级 banner 文案已正确引导（reason=0 明确提示去开屏幕录制权限），无需再改。
+
+### 9.4 对发布纪律的影响
+
+本修复**必须**随下个版本打包验证：只合代码不重新打包 = 用户装的还是没权限声明的旧包，
+问题依旧。promote 正式版前须在真机确认「首次启动弹授权窗 + 授权后画面非测试图」两项。

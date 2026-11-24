@@ -6,6 +6,7 @@
 //! 用 **base64** 字符串承载（前端 `atob` 还原喂 WebCodecs `VideoDecoder`）。本模块**不引
 //! 新 crate**：内联一个极简 base64 编码器（标准字母表 + `=` 填充），保持离线 vendor 门纯净。
 
+use lp::datagram::capture_degraded_from_flags;
 use lp::jitter::Frame;
 use serde::Serialize;
 
@@ -65,6 +66,10 @@ pub struct VideoFrameMsg {
     pub nalu: String,
     /// 是否 IDR 关键帧（I / I+SpsPps；前端据此 flush 解码器）。
     pub is_idr: bool,
+    /// 受控端采集降级 reason 码（Some(0)=无屏幕录制权限 / Some(1)=锁屏黑帧；None=真实画面）。
+    /// 经视频 datagram flags 带内上报（问题 2/5），前端据此显示「当前为测试画面」banner。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_degraded: Option<u8>,
 }
 
 /// 把 [`lp::jitter::Frame`] 归一成 [`VideoFrameMsg`]（NALU → base64）。
@@ -75,6 +80,7 @@ pub fn frame_to_msg(f: &Frame) -> VideoFrameMsg {
         flags: f.flags,
         nalu: base64_encode(&f.nalu),
         is_idr: f.is_idr(),
+        capture_degraded: capture_degraded_from_flags(f.flags),
     }
 }
 

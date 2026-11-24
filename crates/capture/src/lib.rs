@@ -6,6 +6,9 @@
 
 pub mod dirty;
 pub mod monitors;
+pub mod quality;
+
+pub use quality::is_blank_frame;
 
 // 平台真实采屏实现（cfg 门控，按 target_os 自动编译）。
 #[cfg(target_os = "macos")]
