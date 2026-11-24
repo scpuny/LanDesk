@@ -32,6 +32,9 @@
 
 > 触发脚本只会 push `test-build/**` 分支，用的是 `git push -f origin HEAD:refs/heads/test-build/latest`
 > （**不带 -u**）——早期版本带 `-u` 会把开发分支 upstream 改成触发分支，之后普通 `git push` 就推错地方，已修复。
+>
+> 工作流里的版本注入脚本对 `tauri.conf.json` 的读写都显式 `encoding='utf-8'`——Windows 上 Python
+> 默认 cp1252，读含中文权限说明的配置会 `UnicodeDecodeError`（首个 run 实测踩到并已修复）。
 
 1. 脚本会打印该 run 的 Actions 链接；也可打开
    `https://github.com/scpuny/LanDesk/actions/workflows/test-build.yml?query=branch%3Atest-build/latest`。
