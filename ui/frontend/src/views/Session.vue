@@ -11,6 +11,7 @@ import { watchSessionCloseRequest } from '../composables/useSessionWindow'
 import type { SessionState, ConnMode, ControlAction, VideoFrameMsg } from '../types/index'
 import Icon from '../components/common/Icon.vue'
 import WindowControls from '../components/layout/WindowControls.vue'
+import { normPoint, protocolButton, buttonBit, type FrameSize, type ScaleMode } from '../lib/video-geometry'
 
 // `standalone`：会话独立 OS 窗体（label "session"，Tauri `SessionApp` 渲染）时为 true——
 // 「关闭会话 / 返回设备列表 / 去开启中继」等回退动作**关闭本会话窗**（`window_close` 关调用方窗口），
@@ -52,6 +53,9 @@ const stateLabel = computed(() => stateInfo.value.label +
   (state.sessionState === 'reconnecting' ? ` ${Math.min(reconnectAttempt.value, maxAttempts.value)}/${maxAttempts.value}` : ''))
 
 const scaleMode = ref('自适应')
+// 当前视频内禀像素（首帧由解码器回报）——object-fit 与坐标换算都必须以它为基准，
+// 不能拿写死的 1280×720 canvas 属性当真实分辨率（否则原始尺寸点击整体偏移、画面被二次缩放）。
+const frameSize = ref<FrameSize>({ width: 0, height: 0 })
 const retryAttempt = ref(2)
 const password = ref('')
 // #88：OpenH264 降级 banner 改**事件驱动**（`encoder=OpenH264` 且 `reset>0` 才显示，非写死 true）。
@@ -262,55 +266,85 @@ function modsOf(e: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaK
   if (e.metaKey) m |= 8
   return m
 }
-/** client 坐标 → 归一化 0..65535（按 canvas object-fit 显示区换算，letterbox 区外返回 null）。 */
+
+// 输入坐标自检（排障用）：「更多 → 输入坐标自检」打开后底栏显示最近一帧真实下发的
+// 归一化坐标 / 协议按键码，双机验证时能直接看出「点击有没有发出、落在画面哪个位置」。
+const inputDebug = ref(false)
+const lastInput = ref('—')
+const inputCursor = ref<{ x: number; y: number } | null>(null)
+/** 自检模式下在本地画面上标出点击落点，直接和远端光标对照。 */
+function markInputCursor(e: MouseEvent): void {
+  if (!inputDebug.value) return
+  const c = canvasEl.value
+  if (!c) return
+  const r = c.getBoundingClientRect()
+  inputCursor.value = { x: Math.round(e.clientX - r.left), y: Math.round(e.clientY - r.top) }
+}
+function noteInput(action: ControlAction): void {
+  if (!inputDebug.value) return
+  if (action.type === 'mouseMove') lastInput.value = `move ${action.x},${action.y} · b${action.buttons}`
+  else if (action.type === 'mouseButton') lastInput.value = `btn ${action.button} ${action.down ? '↓' : '↑'}`
+  else if (action.type === 'mouseWheel') lastInput.value = `wheel ${action.dx},${action.dy}`
+}
+
+/** client 坐标 → 归一化 0..65535（按视频真实显示矩形换算，letterbox / 裁切区外返回 null）。 */
 function canvasNorm(clientX: number, clientY: number): { x: number; y: number } | null {
   const c = canvasEl.value
   if (!c) return null
   const rect = c.getBoundingClientRect()
-  const vw = c.width || 1280
-  const vh = c.height || 720
-  const ar = vw / vh
-  const rectAr = rect.width / rect.height
-  let dw: number, dh: number, dx: number, dy: number
-  if (scaleMode.value === '原始尺寸') {
-    // 原始尺寸：canvas CSS 盒子即视频区（1:1）
-    dw = rect.width; dh = rect.height; dx = rect.left; dy = rect.top
-  } else if (rectAr > ar) {
-    dh = rect.height; dw = rect.height * ar; dx = rect.left + (rect.width - dw) / 2; dy = rect.top
-  } else {
-    dw = rect.width; dh = rect.width / ar; dx = rect.left; dy = rect.top + (rect.height - dh) / 2
-  }
-  const rx = (clientX - dx) / dw
-  const ry = (clientY - dy) / dh
-  if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return null
-  return { x: Math.round(rx * 65535), y: Math.round(ry * 65535) }
+  const frame: FrameSize = frameSize.value.width > 0 && frameSize.value.height > 0
+    ? frameSize.value
+    : { width: c.width || 1280, height: c.height || 720 }
+  return normPoint(clientX, clientY, rect, frame, scaleMode.value as ScaleMode)
 }
 /** 静默发一帧（连续输入不用 toast，仅失败时轻提示一次）。 */
 function sendQuiet(action: ControlAction): void {
+  noteInput(action)
   void sendControl(action).then((r) => {
     if (!r.ok && action.type !== 'mouseMove') toast(r.error || '控制帧发送失败', 'error')
   })
 }
 function onMouseMove(e: MouseEvent): void {
   if (!inputEnabled()) return
+  markInputCursor(e)
   const n = canvasNorm(e.clientX, e.clientY)
   if (!n) return
   sendQuiet({ type: 'mouseMove', x: n.x, y: n.y, buttons: mouseButtons, mods: modsOf(e) })
 }
 function onMouseDown(e: MouseEvent): void {
   if (!inputEnabled()) return
+  markInputCursor(e)
   canvasEl.value?.focus()   // 焦点到画面 canvas → 键盘事件（#72）被捕获
-  const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0
+  const bit = buttonBit(e.button)
+  const proto = protocolButton(e.button)
   if (bit) mouseButtons |= bit
   const n = canvasNorm(e.clientX, e.clientY)
   if (n) sendQuiet({ type: 'mouseMove', x: n.x, y: n.y, buttons: mouseButtons, mods: modsOf(e) })
-  if (bit) sendQuiet({ type: 'mouseButton', button: e.button as 0 | 1 | 2, down: 1 })
+  // ★ DOM button(0 左/1 中/2 右) ≠ 协议码(0 左/1 右/2 中)：历史 bug 把右键当成了中键。
+  if (proto !== null && bit) sendQuiet({ type: 'mouseButton', button: proto, down: 1 })
+  // 右键：挡掉 WebView 原生上下文菜单（否则看到的是 Rust webview 的右键菜单）。
+  if (e.button === 2) e.preventDefault()
+}
+/** 按 DOM button 释放鼠标键（补发按钮抬起）。 */
+function releaseButton(jsButton: number): void {
+  const bit = buttonBit(jsButton)
+  const proto = protocolButton(jsButton)
+  if (bit) mouseButtons &= ~bit
+  if (proto !== null && bit) sendQuiet({ type: 'mouseButton', button: proto, down: 0 })
 }
 function onMouseUp(e: MouseEvent): void {
   if (!inputEnabled()) return
-  const bit = e.button === 0 ? 1 : e.button === 2 ? 2 : e.button === 1 ? 4 : 0
-  if (bit) mouseButtons &= ~bit
-  if (bit) sendQuiet({ type: 'mouseButton', button: e.button as 0 | 1 | 2, down: 0 })
+  // 抬起前先补一帧 move：保证 down/up 落在同一远端位置（拖动、任务栏点击都依赖这个顺序）。
+  const n = canvasNorm(e.clientX, e.clientY)
+  if (n) sendQuiet({ type: 'mouseMove', x: n.x, y: n.y, buttons: mouseButtons, mods: modsOf(e) })
+  releaseButton(e.button)
+}
+/** 在画布外抬起也要释放：否则受控端一直处于按下态，后续点击全部失效。 */
+function onGlobalMouseUp(e: MouseEvent): void {
+  if (!inputEnabled() || e.target === canvasEl.value || mouseButtons === 0) return
+  if (mouseButtons & 1) releaseButton(0)
+  if (mouseButtons & 2) releaseButton(2)
+  if (mouseButtons & 4) releaseButton(1)
 }
 function onWheel(e: WheelEvent): void {
   if (!inputEnabled()) return
@@ -371,8 +405,11 @@ function b64ToBytes(b64: string): Uint8Array {
   return out
 }
 
-/** 惰性配置 H.264 `VideoDecoder`（首帧时按 canvas 内禀尺寸）。
- *  输出回调把解码帧画到 canvas 并 `close()` 释放帧内存；不支持 / 配置失败回 `false`。 */
+/** 惰性配置 H.264 `VideoDecoder`。
+ *  首帧起输出回调按 `frame.displayWidth/Height` 把 canvas 内禀尺寸对齐到真实分辨率
+ *  （历史实现固定 1280×720：1920×1080 先被缩小一次再由 CSS 放大 → 二次重采样发虚，
+ *  且「原始尺寸」变成 1280×720 而不是真的 1:1）。尺寸变化（切显示器）时同步更新
+ *  `frameSize`，坐标换算与 object-fit 都以此为基准。 */
 function ensureDecoder(): boolean {
   if (decoderReady && decoder) return true
   const canvas = canvasEl.value
@@ -385,8 +422,17 @@ function ensureDecoder(): boolean {
         // 重新读 live ref，避免画到已卸载的旧 canvas 元素。
         const c = canvasEl.value
         if (c) {
+          const fw = Math.max(1, Math.min(4096, frame.displayWidth || w))
+          const fh = Math.max(1, Math.min(4096, frame.displayHeight || h))
+          if (c.width !== fw || c.height !== fh) {
+            c.width = fw
+            c.height = fh
+          }
+          if (frameSize.value.width !== fw || frameSize.value.height !== fh) {
+            frameSize.value = { width: fw, height: fh }
+          }
           const ctx = c.getContext('2d')
-          if (ctx) ctx.drawImage(frame, 0, 0, c.width || w, c.height || h)
+          if (ctx) ctx.drawImage(frame, 0, 0, fw, fh)
         }
         frame.close()   // 已 draw 完，归还 WebCodecs 帧内存
       },
@@ -442,6 +488,7 @@ function stopVideoDecoder(): void {
   }
   decoderReady = false
   baseTs = 0
+  frameSize.value = { width: 0, height: 0 }
 }
 
 /** 停画面流（停传输 + 关解码器）。 */
@@ -565,11 +612,14 @@ onMounted(async () => {
   loadReconnectPlan()
   // 原生关闭请求（macOS 交通灯 ×）先弹确认，不直接关窗。
   unwatchClose = watchSessionCloseRequest(() => { void confirmCloseWindow() })
+  // 画布外抬键也要释放受控端按键态（否则一次越界松手会让后续所有点击失效）。
+  window.addEventListener('mouseup', onGlobalMouseUp)
   // live：拉当前会话状态快照（未连 = idle，据此渲染顶部标签 + 底部状态栏）。
   await loadSessionStatus()
 })
 onBeforeUnmount(() => {
   if (unwatchClose) unwatchClose()
+  window.removeEventListener('mouseup', onGlobalMouseUp)
   if (timer) clearInterval(timer)
   stopVideo(); stopMetrics()
 })
@@ -597,6 +647,7 @@ onBeforeUnmount(() => {
             <button @click="onToolScreenshot"><Icon name="camera" :size="14" /> 截图</button>
             <button @click="toggleScale"><Icon name="minimize" :size="14" /> {{ scaleMode === '自适应' ? '切原始尺寸' : '切自适应' }}</button>
             <button @click="onToolFullscreen"><Icon name="fullscreen" :size="14" /> {{ isFullscreen ? '还原' : '全屏' }}</button>
+            <button @click="inputDebug = !inputDebug"><Icon name="activity" :size="14" /> {{ inputDebug ? '关闭' : '开启' }}输入坐标自检</button>
             <button @click="disconnect"><Icon name="power" :size="14" /> 断开连接</button>
           </div>
         </div>
@@ -632,6 +683,8 @@ onBeforeUnmount(() => {
           @mousemove="onMouseMove"
           @mousedown="onMouseDown"
           @mouseup="onMouseUp"
+          @contextmenu.prevent
+          @auxclick.prevent
           @wheel.prevent="onWheel"
           @keydown="onKeyDown"
           @keyup="onKeyUp"
@@ -640,6 +693,12 @@ onBeforeUnmount(() => {
         <!-- 运行态专属 chrome：悬浮工具栏 / 顶部标签 / 降级 banner / 底部提示（重连中隐藏，让位给重连浮层）。 -->
         <template v-if="state.sessionState === 'running'">
           <div style="position:absolute;top:14px;left:16px;font-size:12px;color:#e8edf5;opacity:.8">● 远程桌面 · {{ scaleMode }}画质</div>
+          <!-- 输入自检：显示真实下发帧，双机排障用（默认关闭，不干扰正常使用）。 -->
+          <div v-if="inputDebug" class="ld-sess-input-debug">
+            输入自检 · {{ frameSize.width }}×{{ frameSize.height }} · {{ lastInput }}
+          </div>
+          <div v-if="inputDebug && inputCursor" class="ld-sess-input-cross"
+               :style="{ left: `${inputCursor.x}px`, top: `${inputCursor.y}px` }" />
           <div style="position:absolute;top:14px;right:16px;font-size:12px;color:#e8edf5;opacity:.8;display:flex;align-items:center;gap:6px"><Icon name="shield" :size="13" /> QUIC + AES-256-GCM 加密通话</div>
           <!-- 采集降级（问题 2/5）：对方屏幕未采集成功，当前是测试画面——醒目提示，避免误认真桌面。 -->
           <div class="ld-sess-warnbar ld-sess-warnbar--capture" v-if="showCaptureDegradedBanner">

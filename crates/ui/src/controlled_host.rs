@@ -40,7 +40,7 @@ use landesk_core::oneclick::{Controlled, OneClickSession};
 use landesk_core::video_pump::{PumpConfig, VideoPump};
 use mdns::DEFAULT_PORT;
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::device_code_from;
 
@@ -360,11 +360,22 @@ async fn serve_session(mut session: OneClickSession, device_code: String) {
         }
     };
     let (screen_w, screen_h) = input::primary_screen_size();
+    // 输入帧采样日志：前 12 帧 + 每 200 帧一条 INFO，用于双机排障时证明
+    // 「控制端点击是否真的到达受控端、归一化坐标落在哪、注入是否成功」。
+    // 全量帧仍走 DEBUG，不把日志 ring 冲爆。
+    let mut input_count: u64 = 0;
     loop {
         match session.recv_control().await {
             Ok(msg) => {
                 if let Some(ref inj) = injector {
-                    match landesk_core::apply_input(inj.as_ref(), &msg, screen_w, screen_h) {
+                    input_count += 1;
+                    let sampled = input_count <= 12 || input_count.is_multiple_of(200);
+                    let applied = landesk_core::apply_input(inj.as_ref(), &msg, screen_w, screen_h);
+                    if sampled {
+                        info!(count = input_count, screen_w, screen_h, ?msg, result = ?applied,
+                            "受控端输入帧采样");
+                    }
+                    match applied {
                         Ok(landesk_core::DispatchResult::Injected) => {
                             debug!(?msg, "受控端注入输入帧");
                         }

@@ -361,7 +361,9 @@
 }
 /* 自绘主窗体 macOS（交通灯 overlay）：会话顶栏左侧留白避开原生交通灯（三键宽约 78px）。
    Win/Linux（decorations:false）不套此类 —— 窗口三键在右侧。 */
-.ld-sess-top--mac { padding-left: var(--ld-titlebar-traffic-w); }
+/* macOS 交通灯在左侧，右侧没有自绘三键——断开按钮必须留出右内边距，
+   否则贴着窗口边缘被裁掉（用户反馈「右上角断开连接右边应该还有内容」）。 */
+.ld-sess-top--mac { padding-left: var(--ld-titlebar-traffic-w); padding-right: var(--ll-space-3); }
 .ld-sess-state { flex: none; display: inline-flex; align-items: center; gap: var(--ll-space-2); font-size: var(--ll-fs-sm); font-weight: var(--ll-fw-medium); }
 /* 目标名可收缩省略：窗口变窄或 macOS 左侧留白挤出时，优先压缩此处而非把右侧工具顶出边界。 */
 .ld-sess-target {
@@ -451,6 +453,24 @@
   font-size: var(--ll-fs-sm); z-index: 3; box-shadow: var(--ll-shadow-pop);
 }
 .ld-sess-warnbar button { border: none; background: transparent; color: inherit; display: inline-flex; }
+/* 输入坐标自检浮标（「更多」里手动开；默认不显示，不影响正常会话观感）。 */
+.ld-sess-input-debug {
+  position: absolute; top: 36px; left: 16px; z-index: 3;
+  padding: 5px 10px; border-radius: var(--ll-radius-xs);
+  background: rgba(8, 14, 24, .82); border: 1px solid var(--ll-color-brand);
+  color: var(--ll-session-text); font-family: var(--ll-font-mono); font-size: var(--ll-fs-xs);
+  pointer-events: none;
+}
+/* 自检落点十字：只作视觉对照，不接收指针事件。 */
+.ld-sess-input-cross {
+  position: absolute; width: 18px; height: 18px; margin-left: -9px; margin-top: -9px;
+  border: 1px solid var(--ll-color-brand); border-radius: 50%; z-index: 4; pointer-events: none;
+}
+.ld-sess-input-cross::before, .ld-sess-input-cross::after {
+  content: ''; position: absolute; background: var(--ll-color-brand);
+}
+.ld-sess-input-cross::before { left: 8px; top: -5px; width: 1px; height: 26px; }
+.ld-sess-input-cross::after { left: -5px; top: 8px; width: 26px; height: 1px; }
 /* 采集降级 banner（问题 2/5）：红色警示 + 允许长文案换行（比编码降级更严重——画面根本不是真实桌面）。 */
 .ld-sess-warnbar--capture {
   top: var(--ll-space-3); border-radius: var(--ll-radius-md); max-width: min(760px, 92%);
