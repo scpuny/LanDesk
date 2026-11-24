@@ -69,14 +69,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json"))["version"])')"
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
           VER="${BASE}-test.${{ github.run_number }}"
           python3 - "${VER}" <<'PY'
           import json, sys
           p = "ui/src-tauri/tauri.conf.json"
-          d = json.load(open(p))
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
           d["version"] = sys.argv[1]
-          json.dump(d, open(p, "w"), ensure_ascii=False, indent=2)
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           print("injected version:", d["version"])
           PY
           echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
@@ -191,14 +193,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json"))["version"])')"
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
           VER="${BASE}-test.${{ github.run_number }}"
           python3 - "${VER}" <<'PY'
           import json, sys
           p = "ui/src-tauri/tauri.conf.json"
-          d = json.load(open(p))
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
           d["version"] = sys.argv[1]
-          json.dump(d, open(p, "w"), ensure_ascii=False, indent=2)
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           print("injected version:", d["version"])
           PY
           echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
@@ -306,14 +310,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json"))["version"])')"
+          BASE="$(python3 -c 'import json;print(json.load(open("ui/src-tauri/tauri.conf.json", encoding="utf-8"))["version"])')"
           VER="${BASE}-test.${{ github.run_number }}"
           python3 - "${VER}" <<'PY'
           import json, sys
           p = "ui/src-tauri/tauri.conf.json"
-          d = json.load(open(p))
+          # Windows 上 Python open() 默认 cp1252，读中文 tauri.conf.json 会 UnicodeDecodeError，
+          # 必须显式 utf-8（macOS/Linux 默认 utf-8 才没暴露，实测 Windows job 踩到）。
+          d = json.load(open(p, encoding="utf-8"))
           d["version"] = sys.argv[1]
-          json.dump(d, open(p, "w"), ensure_ascii=False, indent=2)
+          json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           print("injected version:", d["version"])
           PY
           echo "PKG_VERSION=${VER}" >> "$GITHUB_ENV"
