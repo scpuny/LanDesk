@@ -52,8 +52,10 @@ fi
 SLUG_REMOTE="${SLUG_REMOTE%.git}"
 echo "   仓库: ${SLUG_REMOTE}"
 
-# push 当前 HEAD 到触发分支（force：该分支是纯触发器，每次覆盖即可）
-GIT_TERMINAL_PROMPT=0 git push -u -f origin "HEAD:refs/heads/${TRIGGER_BRANCH}"
+# push 当前 HEAD 到触发分支（force：该分支是纯触发器，每次覆盖即可）。
+# 注意：不能用 -u，否则会把当前开发分支的 upstream 改成 test-build/**，
+# 之后普通 git push 就会推到触发分支而非开发分支（踩过这个坑）。
+GIT_TERMINAL_PROMPT=0 git push -f origin "HEAD:refs/heads/${TRIGGER_BRANCH}"
 
 echo ""
 echo "已触发。查看构建进度："
