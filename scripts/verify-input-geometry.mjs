@@ -83,4 +83,17 @@ check('DOM 鼠标键码 → buttons 位掩码', () => {
   assert.equal(buttonBit(3), 0)
 })
 
+// 渲染回归护栏：canvas 尺寸设置绝不能出现在 VideoDecoder output 回调里。
+// 设置 canvas.width/height 会清空后备存储并重置 2D context，WKWebView 下随后
+// drawImage 静默失败 → 整屏全黑（v5 实测）。尺寸必须在模板静态声明、decode 之前同步。
+check('渲染护栏：output 回调不写 canvas.width/height，canvas 内禀为 1920×1080', () => {
+  const vue = readFileSync(new URL('../ui/frontend/src/views/Session.vue', import.meta.url), 'utf8')
+  const outputBody = vue.slice(vue.indexOf('output: (frame: VideoFrame)'), vue.indexOf("frame.close()"))
+  assert.ok(!/canvas\.width\s*=/.test(outputBody), 'output 回调里禁止写 canvas.width')
+  assert.ok(!/canvas\.height\s*=/.test(outputBody), 'output 回调里禁止写 canvas.height')
+  assert.ok(!/\bc\.width\s*=/.test(outputBody), 'output 回调里禁止写 c.width')
+  assert.ok(!/\bc\.height\s*=/.test(outputBody), 'output 回调里禁止写 c.height')
+  assert.match(vue, /width="1920"\s+height="1080"/, 'canvas 内禀应为 1920×1080')
+})
+
 console.log(`\n${passed}/${passed} 断言通过`)

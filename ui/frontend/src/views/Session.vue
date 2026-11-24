@@ -406,33 +406,24 @@ function b64ToBytes(b64: string): Uint8Array {
 }
 
 /** 惰性配置 H.264 `VideoDecoder`。
- *  首帧起输出回调按 `frame.displayWidth/Height` 把 canvas 内禀尺寸对齐到真实分辨率
- *  （历史实现固定 1280×720：1920×1080 先被缩小一次再由 CSS 放大 → 二次重采样发虚，
- *  且「原始尺寸」变成 1280×720 而不是真的 1:1）。尺寸变化（切显示器）时同步更新
- *  `frameSize`，坐标换算与 object-fit 都以此为基准。 */
+ *  canvas 内禀固定 1920×1080（见模板 width/height），output 回调**只 drawImage**：
+ *  绝不在回调里改 canvas.width/height —— 那会清空后备存储 + 重置 2D context，
+ *  WKWebView 下随后的 drawImage 会静默失败导致整屏全黑（v5 实测回归）。
+ *  frameSize 在 onVideoFrame（decode 之前）按 canvas 内禀同步，供坐标换算用。 */
 function ensureDecoder(): boolean {
   if (decoderReady && decoder) return true
   const canvas = canvasEl.value
   if (!canvas || typeof VideoDecoder === 'undefined') return false
-  const w = canvas.width || 1280
-  const h = canvas.height || 720
+  const w = canvas.width || 1920
+  const h = canvas.height || 1080
   try {
     decoder = new VideoDecoder({
       output: (frame: VideoFrame) => {
         // 重新读 live ref，避免画到已卸载的旧 canvas 元素。
         const c = canvasEl.value
         if (c) {
-          const fw = Math.max(1, Math.min(4096, frame.displayWidth || w))
-          const fh = Math.max(1, Math.min(4096, frame.displayHeight || h))
-          if (c.width !== fw || c.height !== fh) {
-            c.width = fw
-            c.height = fh
-          }
-          if (frameSize.value.width !== fw || frameSize.value.height !== fh) {
-            frameSize.value = { width: fw, height: fh }
-          }
           const ctx = c.getContext('2d')
-          if (ctx) ctx.drawImage(frame, 0, 0, fw, fh)
+          if (ctx) ctx.drawImage(frame, 0, 0, c.width || w, c.height || h)
         }
         frame.close()   // 已 draw 完，归还 WebCodecs 帧内存
       },
@@ -468,6 +459,12 @@ function onVideoFrame(f: VideoFrameMsg): void {
   }
   if (!ensureDecoder()) return
   if (!decoder || decoder.state === 'closed') return
+  // 帧尺寸基准在 decode 之前按 canvas 内禀同步（不放 output 回调：
+  // ① WebCodecs 热路径里改响应式 ref 会触发同步重渲染；② 那里改 canvas.width 会清屏）。
+  const c = canvasEl.value
+  if (c && (frameSize.value.width !== c.width || frameSize.value.height !== c.height)) {
+    frameSize.value = { width: c.width, height: c.height }
+  }
   const data = b64ToBytes(f.nalu)
   countFrame(data.length)   // #74：累计画面字节 → 窗口吞吐
   const chunk = new EncodedVideoChunk({
@@ -676,8 +673,8 @@ onBeforeUnmount(() => {
           v-if="isLive && (liveSession?.stateCode === 'running' || liveSession?.stateCode === 'reconnecting')"
           ref="canvasEl"
           class="ld-sess-canvas__bg"
-          width="1280"
-          height="720"
+          width="1920"
+          height="1080"
           :style="{ background:'#000', zIndex:1, objectFit: scaleFit, cursor:'crosshair' }"
           tabindex="0"
           @mousemove="onMouseMove"
