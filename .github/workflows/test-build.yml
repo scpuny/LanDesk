@@ -18,10 +18,21 @@
 name: Test Build（双机验证测试包）
 
 on:
+  # push 到 test-build/** 专用分支即构建。GitHub 限制 workflow_dispatch/repository_dispatch
+  # 只能触发默认分支(main)上的工作流文件；push 事件则会读取被推送分支自身的工作流定义，
+  # 这是本工作流尚未合入 main 前唯一可靠的触发方式。test-build/** 是纯触发分支，可反复覆盖。
+  push:
+    branches:
+      - 'test-build/**'
+  # 合入默认分支后可在 Actions UI 手动触发并选 ref。
   workflow_dispatch:
 
 permissions:
   contents: read # 只读代码，不写 Release / tag / 分支
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: false # 不取消在跑的构建，避免测试包半途而废
 
 jobs:
   # ------------------------------------------------------------------

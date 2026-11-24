@@ -18,11 +18,22 @@
 
 ## 1. 构建测试包（约 2 分钟操作，CI 编译较慢）
 
-1. 打开仓库 → **Actions** 页 → 左侧选 **Test Build（双机验证测试包）**。
-2. 右侧 "Run workflow" 下拉：
-   - **Use workflow from** 选要验证的分支（当前修复在 `feature/diagnostic-verification`，合入后选 `dev`）。
-   - 点 **Run workflow**。
-3. 等待 run 完成（三个 job：macos / windows / linux）。**GUI 打包是 best-effort**：
+> **为什么不是 Actions 页面点按钮？** GitHub 限制 `workflow_dispatch`（手动触发）
+> 只响应**默认分支（main）**上的工作流文件。当前工作流在 `feature/diagnostic-verification`
+> 分支、尚未合入 main，API/UI 都触发不到。因此用一个**专用触发分支** `test-build/**`：
+> push 事件读取的是被推送分支自己的工作流定义，不受默认分支限制。
+> 触发脚本把当前 HEAD 推到 `test-build/latest`（纯触发分支，可覆盖），**不碰 dev/main/tag**。
+
+```bash
+# 在要验证的分支上（当前是 feature/diagnostic-verification）
+./scripts/trigger-test-build.sh              # 触发，输出 run 链接
+./scripts/trigger-test-build.sh --wait       # 触发并等到结束（最多 40 分钟）
+```
+
+1. 脚本会打印该 run 的 Actions 链接；也可打开
+   `https://github.com/scpuny/LanDesk/actions/workflows/test-build.yml?query=branch%3Atest-build/latest`。
+   （合入 main 后，也可直接在 Actions 页手动 Run workflow。）
+2. 等待 run 完成（三个 job：macos / windows / linux）。**GUI 打包是 best-effort**：
    - 关键看每个 job 末尾 `GUI artifacts:` / `GUI NSIS:` / `GUI deb:` 的日志行——
      有文件名才是真出了安装包；空了就是 GUI 编译失败，只出了 CLI，**不要拿 CLI 当 GUI 用**。
 4. run 页面底部 **Artifacts** 下载：
