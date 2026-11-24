@@ -199,14 +199,15 @@ CI 无屏幕/无权限/无真实会话，天然覆盖不到 → 每版只能靠�
 且原 `Logs.vue:exportLog()` 是假导出（仅 toast），出问题拿不到日志证据，只能靠截图猜
 （本次就是从"红块图案"反推出 SynthCapture 降级）。
 
-### 8.2 已落地（4 个本地提交，均未推送）
+### 8.2 已落地（6 个本地提交，均未推送）
 
 | 层 | 能力 | 实现 |
 |---|---|---|
 | 可定位 | 诊断包真实导出 | `lib/diagnostics.ts` 组装"环境快照（平台/版本/本机/受控/配置摘要脱敏）+ 可疑事件 + 全部原始日志"，Blob 下载；版本由 vite 从 `tauri.conf.json` 注入，单一来源 |
 | 可定位 | 关键事件落日志 | `SessionManager.poll_video` 检测采集降级码跳变记一条（0=无录屏权限/1=锁屏黑帧，connect/close 复位）；`session_connect` 失败日志带目标 IP:port，便于推断对端防火墙拦 UDP 入站 |
 | 验证前置 | 运行自检页 | 设置页展示本机可测项（受控监听/mDNS/编码能力/版本，实读状态）；对端项（录屏权限/锁屏/防火墙）明确标注"需对端确认"，不造假绿灯 |
-| 验证前置 | VBox 双机冒烟脚本 | `scripts/test-e2e/vbox-smoke.sh`：VBoxManage 起停 VM + arp 探活 + UDP 52000 探测；guest 内 GUI 操作标准化为人工打勾清单（含五问题回归项）。控制端 CLI 是骨架、无驱动入口，故非全自动 |
+| 验证前置 | headless 驱动命令 | `controller device-list`：mDNS 发现输出 JSON；`controller probe`：连接 + 采样视频数据报，按 IDR/降级 flags 判定画面可用性，输出 PASS/FAIL JSON + 退出码。不解码 H.264、零编解码依赖 |
+| 验证前置 | VBox 双机冒烟脚本 | `scripts/test-e2e/vbox-smoke.sh`：VBoxManage 起停 VM + arp 探活 + **自动调用 device-list/probe**，guest 内目视/键鼠/布局仍需人工打勾（含五问题回归项）；自动项 FAIL 即 exit 1 拦发布 |
 
 ### 8.3 使用约束（重要）
 
@@ -222,3 +223,34 @@ CI 无屏幕/无权限/无真实会话，天然覆盖不到 → 每版只能靠�
 2. 合入 `dev` → 切 `pre-release` → CI 全绿 → 跑 `vbox-smoke.sh` + 诊断包抽查。
 3. 冒烟人工项全部打勾、无未决问题 → 才从 pre-release 打 `v*` tag → Release → finalize main。
 4. 任一回归项未过 → 不得 promote 正式版。
+
+### 8.5 自动化判据与回归验证（本轮补强）
+
+**probe 判定优先级**（纯函数 `verdict_for`，7 单测覆盖）：
+
+| 观测 | 判据 | 对应问题 |
+|---|---|---|
+| flags 降级 reason=0 | FAIL `capture_no_permission` | 问题 2（macOS 无录屏权限显示测试图） |
+| flags 降级 reason=1 | FAIL `capture_blank_frame` | 问题 5（Windows 锁屏纯黑） |
+| 采样窗口内 0 视频包 | FAIL `no_video_frames` | 受控服务未起 / 防火墙拦 UDP 入站（问题 4 相关） |
+| 有包但无 IDR（kind 0/1） | FAIL `no_keyframe` | 前端解码器无法出首帧；仅 SPS/PPS 重传不算 |
+| 有 IDR 且无降级 | PASS `ok` | 连接 + 关键帧 + 真实画面链路通 |
+
+> probe 不解码 H.264——只读数据报头（kind/flags/seq）与带内降级标志，因此可在无显示/CI 环境运行。
+> 画面"观感"（真实桌面 vs 测试图）仍须人工目视，自动 PASS 不替代这一项。
+
+**冒烟脚本用法**（凭据走环境变量，避免 `ps` 泄露密码）：
+
+```bash
+cargo build -p controller
+CONTROLLER_BIN=target/debug/controller \
+LAN_DESK_DEVICE='<设备码或设备名>' LAN_DESK_PASSWORD='<密码>' \
+  ./scripts/test-e2e/vbox-smoke.sh --no-start
+```
+
+- 未提供凭据时 probe 明确标注"跳过（不造假绿灯）"，不判定 PASS。
+- 无设备/VM 未起时如实 FAIL 并 `exit 1`（实测：3 项 FAIL，禁止 promote）。
+- 报告落 `scripts/test-e2e/reports/`（已 gitignore，含本机 IP 不入库）。
+
+**回归验证**：`npm run verify:diag`（诊断包 9 项断言）、`cargo test -p controller`（判定 7 项）、
+`bash -n vbox-smoke.sh` + `--no-start` 实跑、`cargo clippy --workspace -D warnings` 全绿。
