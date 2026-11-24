@@ -149,11 +149,12 @@ jobs:
             find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
               cp -f "$d" "${WS}/dist/macos/gui/landesk-${ver}-gui-macos-${arch}.dmg"
             done
-            APP=$(find "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)
-            if [[ -n "${APP:-}" ]]; then
+            # Tauri 2 的 .app 在 bundle/macos/（非 Tauri 1 的 bundle/app/）；find 失败不得中断 job。
+            APP="$(find "$B/macos" "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1 || true)"
+            if [[ -n "${APP}" ]]; then
               APPDIR="$(cd "$(dirname "$APP")" && pwd)"
-              ( cd "${APPDIR}" && zip -qr "landesk-${ver}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
-              mv -f "${APPDIR}/landesk-${ver}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
+              ( cd "${APPDIR}" && zip -qr "landesk-${ver}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" ) || true
+              mv -f "${APPDIR}/landesk-${ver}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/" || true
             fi
           done
           echo "GUI dmg/app: $(ls -1 "${WS}/dist/macos/gui" 2>/dev/null | tr '\n' ' ')"

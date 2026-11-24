@@ -125,11 +125,14 @@ jobs:
             find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
               cp -f "$d" "${WS}/dist/macos/gui/landesk-${PKG_VERSION}-gui-macos-${arch}.dmg"
             done
-            APP=$(find "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)
-            if [[ -n "${APP:-}" ]]; then
+            # Tauri 2 把 .app 放在 bundle/macos/（Tauri 1 才是 bundle/app/）。
+            # 目录不存在时 find 返回 1，在 set -e 下会提前终止整个 job → 双架构只跑了一半。
+            # 故两个候选路径都找，且整段管道加 || true 兜底；.app 只是附赠，dmg 才是硬门禁。
+            APP="$(find "$B/macos" "$B/app" -maxdepth 1 -name '*.app' 2>/dev/null | head -1 || true)"
+            if [[ -n "${APP}" ]]; then
               APPDIR="$(cd "$(dirname "$APP")" && pwd)"
-              ( cd "${APPDIR}" && zip -qr "landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
-              mv -f "${APPDIR}/landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
+              ( cd "${APPDIR}" && zip -qr "landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" ) || true
+              mv -f "${APPDIR}/landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/" || true
             fi
             [[ -f "${WS}/dist/macos/gui/landesk-${PKG_VERSION}-gui-macos-${arch}.dmg" ]] \
               || { echo "::error::未产出 ${arch} .dmg，测试包无 GUI 不可用"; exit 1; }
