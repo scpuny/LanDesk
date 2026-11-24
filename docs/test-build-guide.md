@@ -30,6 +30,9 @@
 ./scripts/trigger-test-build.sh --wait       # 触发并等到结束（最多 40 分钟）
 ```
 
+> 触发脚本只会 push `test-build/**` 分支，用的是 `git push -f origin HEAD:refs/heads/test-build/latest`
+> （**不带 -u**）——早期版本带 `-u` 会把开发分支 upstream 改成触发分支，之后普通 `git push` 就推错地方，已修复。
+
 1. 脚本会打印该 run 的 Actions 链接；也可打开
    `https://github.com/scpuny/LanDesk/actions/workflows/test-build.yml?query=branch%3Atest-build/latest`。
    （合入 main 后，也可直接在 Actions 页手动 Run workflow。）
