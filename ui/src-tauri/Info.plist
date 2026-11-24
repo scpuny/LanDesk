@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>LanDesk 需要屏幕录制权限，才能在被控端把真实桌面画面共享给控制端。请在系统设置 → 隐私与安全性 → 屏幕录制 中允许。</string>
+</dict>
+</plist>

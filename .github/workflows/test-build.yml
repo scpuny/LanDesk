@@ -101,11 +101,11 @@ jobs:
           done
           ls -1 "dist/macos"/*.zip
 
-      - name: GUI installer (.dmg/.app, best-effort)
-        continue-on-error: true
+      # 测试包是双机验证的唯一来源：GUI 打包失败必须让 job 红，禁止 best-effort 假绿灯。
+      - name: GUI installer (.dmg/.app, 硬门禁)
         shell: bash
         run: |
-          set -u
+          set -eu
           WS="${GITHUB_WORKSPACE}"
           CFG="${WS}/ui/src-tauri/.cargo/config.toml"
           BAK="${CFG}.bak"
@@ -119,8 +119,7 @@ jobs:
             arch="${t%%-*}"
             echo "== GUI dmg/app ${arch}"
             ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build \
-                --features tauri --target "${t}" ) \
-              || { echo "GUI build ${arch} failed, skipping"; continue; }
+                --features tauri --target "${t}" )
             B="ui/src-tauri/target/${t}/release/bundle"
             mkdir -p "${WS}/dist/macos/gui"
             find "$B/dmg" -name '*.dmg' 2>/dev/null | while read -r d; do
@@ -132,6 +131,8 @@ jobs:
               ( cd "${APPDIR}" && zip -qr "landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "$(basename "${APP}")" )
               mv -f "${APPDIR}/landesk-${PKG_VERSION}-gui-macos-${arch}-app.zip" "${WS}/dist/macos/gui/"
             fi
+            [[ -f "${WS}/dist/macos/gui/landesk-${PKG_VERSION}-gui-macos-${arch}.dmg" ]] \
+              || { echo "::error::未产出 ${arch} .dmg，测试包无 GUI 不可用"; exit 1; }
           done
           echo "GUI artifacts: $(ls -1 "${WS}/dist/macos/gui" 2>/dev/null | tr '\n' ' ')"
 
@@ -223,11 +224,11 @@ jobs:
           ( cd dist/windows && tar -a -c -f "landesk-${PKG_VERSION}-windows-x86_64.zip" cli )
           ls -1 dist/windows/*.zip
 
-      - name: GUI installer (NSIS .exe, best-effort)
-        continue-on-error: true
+      # 测试包是双机验证的唯一来源：GUI 打包失败必须让 job 红，禁止 best-effort 假绿灯。
+      - name: GUI installer (NSIS .exe, 硬门禁)
         shell: bash
         run: |
-          set -u
+          set -eu
           if [ -n "${VCToolsInstallDir:-}" ]; then
             export PATH="$(cygpath -u "${VCToolsInstallDir}bin/Hostx64/x64"):$PATH"
           fi
@@ -240,16 +241,15 @@ jobs:
           mv "${ROOT_CFG}" "${ROOT_BAK}" 2>/dev/null || true
           trap 'mv "${BAK}" "${CFG}" 2>/dev/null || true; mv "${ROOT_BAK}" "${ROOT_CFG}" 2>/dev/null || true' EXIT
           ( cd ui/frontend && npm ci && npm run build )
-          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri ) \
-            || echo "GUI build failed, skipping"
+          ( cd ui/src-tauri && node ../frontend/node_modules/@tauri-apps/cli/tauri.js build --features tauri )
           B="ui/src-tauri/target/release/bundle/nsis"
-          if [[ -d "$B" ]]; then
-            mkdir -p dist/windows/gui
-            find "$B" -maxdepth 1 -name '*.exe' 2>/dev/null | while read -r e; do
-              cp -f "$e" "dist/windows/gui/landesk-${PKG_VERSION}-gui-windows-x86_64-setup.exe"
-            done
-            echo "GUI NSIS: $(ls -1 dist/windows/gui 2>/dev/null | tr '\n' ' ')"
-          fi
+          mkdir -p dist/windows/gui
+          find "$B" -maxdepth 1 -name '*.exe' 2>/dev/null | while read -r e; do
+            cp -f "$e" "dist/windows/gui/landesk-${PKG_VERSION}-gui-windows-x86_64-setup.exe"
+          done
+          [[ -f "dist/windows/gui/landesk-${PKG_VERSION}-gui-windows-x86_64-setup.exe" ]] \
+            || { echo "::error::未产出 NSIS .exe，测试包无 GUI 不可用"; exit 1; }
+          echo "GUI NSIS: $(ls -1 dist/windows/gui 2>/dev/null | tr '\n' ' ')"
 
       - name: 写测试包说明
         shell: bash
@@ -336,6 +336,7 @@ jobs:
           ( cd dist/linux && zip -qr "landesk-${PKG_VERSION}-linux-x86_64.zip" cli )
           ls -1 dist/linux/*.zip
 
+      # 双机验证主控在 macOS/Windows；Linux GUI 保持 best-effort（缺系统库不阻塞验证）。
       - name: GUI installer (.deb, best-effort)
         continue-on-error: true
         run: |
