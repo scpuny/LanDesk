@@ -36,15 +36,19 @@
 > 工作流里的版本注入脚本对 `tauri.conf.json` 的读写都显式 `encoding='utf-8'`——Windows 上 Python
 > 默认 cp1252，读含中文权限说明的配置会 `UnicodeDecodeError`（首个 run 实测踩到并已修复）。
 
-1. 脚本会打印该 run 的 Actions 链接；也可打开
-   `https://github.com/scpuny/LanDesk/actions/workflows/test-build.yml?query=branch%3Atest-build/latest`。
+1. 脚本会打印该 run 的 Actions 链接；也可用带名字的触发分支区分不同批次，例如
+   `./scripts/trigger-test-build.sh v5` → `test-build/v5`，打开
+   `https://github.com/scpuny/LanDesk/actions/workflows/test-build.yml?query=branch%3Atest-build/v5`。
    （合入 main 后，也可直接在 Actions 页手动 Run workflow。）
-2. 等待 run 完成（三个 job：macos / windows / linux）。**GUI 打包是 best-effort**：
-   - 关键看每个 job 末尾 `GUI artifacts:` / `GUI NSIS:` / `GUI deb:` 的日志行——
-     有文件名才是真出了安装包；空了就是 GUI 编译失败，只出了 CLI，**不要拿 CLI 当 GUI 用**。
+2. 等待 run 完成（三个 job：macos / windows / linux）。**GUI 是硬门禁**：
+   - macOS/Windows job 里 GUI 包没产出会直接让 job 变红（禁止 best-effort 假绿灯）；
+     只有 Linux GUI 仍是 best-effort（双机验证只用 macOS/Windows）。
+   - 所以只要三个 job 全绿，就能直接去 Artifacts 下载，**不用逐个翻日志确认 GUI 行**。
+   - 曾踩坑：Tauri 2 的 `.app` 在 `bundle/macos/`，旧脚本按 Tauri 1 的 `bundle/app/` 找，
+     `set -e` 下提前退出导致只出 x86_64 dmg、aarch64 没跑还假红（v4）。已修，v5 起双架构齐全。
 4. run 页面底部 **Artifacts** 下载：
-   - `test-macos-<N>`：含 `landesk-0.5.0-test.N-gui-macos-arm64.dmg`（Apple 芯片）或 `x86_64`（Intel），
-     以及 `landesk-*.dmg` 对应 `-app.zip`。**按 A/B 机芯片选对架构**（Apple Silicon 用 arm64，Intel Mac 用 x86_64）。
+   - `test-macos-<N>`：含 `landesk-0.5.0-test.N-gui-macos-aarch64.dmg`（Apple 芯片）与
+     `landesk-0.5.0-test.N-gui-macos-x86_64.dmg`（Intel）**两个都有**，按 A/B 机芯片选对架构。
    - `test-windows-<N>`：`landesk-0.5.0-test.N-gui-windows-x86_64-setup.exe`。
    - `test-linux-<N>`：`*.deb`（可选）。
    - 每个包附 `README-测试包.txt`，记录来源分支/commit，便于追溯。
